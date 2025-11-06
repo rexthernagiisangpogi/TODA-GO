@@ -1,0 +1,61 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "todago-53cbf",
+          "appId": "1:736872799385:android:3567697b68ff2087e5ac08",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "todago-53cbf",
+          "appId": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "macos": {
+        "default": {
+          "projectId": "todago-53cbf",
+          "appId": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
+          "uploadDebugSymbols": false,
+          "fileOutput": "macos/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "todago-53cbf",
+          "configurations": {
+            "android": "1:736872799385:android:3567697b68ff2087e5ac08",
+            "ios": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
+            "macos": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
+            "web": "1:736872799385:web:3fe1802b80762170e5ac08",
+            "windows": "1:736872799385:web:6dc395146648cf25e5ac08"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint"
+      ]
+    }
+  ]
+}

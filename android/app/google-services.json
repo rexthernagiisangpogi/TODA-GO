@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "736872799385",
+    "project_id": "todago-53cbf",
+    "storage_bucket": "todago-53cbf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:736872799385:android:3567697b68ff2087e5ac08",
+        "android_client_info": {
+          "package_name": "com.example.toda_go"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFNcVMYH2AxZlVjX8W5m6mHS8vBKWEjkI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
