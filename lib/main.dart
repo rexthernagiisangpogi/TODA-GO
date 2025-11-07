@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+// import 'package:firebase_app_check/firebase_app_check.dart'; // Temporarily disabled
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'screens/passenger_screen.dart';
 import 'screens/driver_screen.dart';
@@ -16,6 +18,36 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
+  // Configure Firebase Auth settings for better network tolerance
+  try {
+    if (kDebugMode) {
+      // Disable app verification for testing to bypass reCAPTCHA
+      FirebaseAuth.instance.setSettings(
+        appVerificationDisabledForTesting: true,
+        forceRecaptchaFlow: false,
+      );
+      print('Firebase Auth configured for development - reCAPTCHA disabled');
+    }
+  } catch (e) {
+    print('Firebase Auth configuration failed: $e');
+  }
+  
+  // Initialize Firebase App Check - temporarily disabled due to network issues
+  // try {
+  //   await FirebaseAppCheck.instance.activate(
+  //     // For debug builds, use debug provider
+  //     // For release builds, you'll need to configure Play Integrity or DeviceCheck
+  //     androidProvider: AndroidProvider.debug,
+  //     appleProvider: AppleProvider.debug,
+  //   );
+  //   print('Firebase App Check initialized successfully');
+  // } catch (e) {
+  //   print('Firebase App Check initialization failed: $e');
+  //   // Continue without App Check for now
+  // }
+  print('Firebase App Check temporarily disabled for network troubleshooting');
+  
   // Initialize push notifications (FCM)
   try {
     await PushNotificationService.initialize();

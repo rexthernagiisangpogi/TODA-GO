@@ -2,7 +2,7 @@
 // ignore_for_file: type=lint
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+    show defaultTargetPlatform, TargetPlatform;
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -16,9 +16,6 @@ import 'package:flutter/foundation.dart'
 /// ```
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
-    if (kIsWeb) {
-      return web;
-    }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
@@ -27,7 +24,6 @@ class DefaultFirebaseOptions {
       case TargetPlatform.macOS:
         return macos;
       case TargetPlatform.windows:
-        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -39,15 +35,6 @@ class DefaultFirebaseOptions {
         );
     }
   }
-
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyD1zQhG5UW305Xc9teFN1o37Jqv8vGw-20',
-    appId: '1:736872799385:web:3fe1802b80762170e5ac08',
-    messagingSenderId: '736872799385',
-    projectId: 'todago-53cbf',
-    authDomain: 'todago-53cbf.firebaseapp.com',
-    storageBucket: 'todago-53cbf.firebasestorage.app',
-  );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDFNcVMYH2AxZlVjX8W5m6mHS8vBKWEjkI',
@@ -75,12 +62,4 @@ class DefaultFirebaseOptions {
     iosBundleId: 'com.example.todaGo',
   );
 
-  static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyD1zQhG5UW305Xc9teFN1o37Jqv8vGw-20',
-    appId: '1:736872799385:web:6dc395146648cf25e5ac08',
-    messagingSenderId: '736872799385',
-    projectId: 'todago-53cbf',
-    authDomain: 'todago-53cbf.firebaseapp.com',
-    storageBucket: 'todago-53cbf.firebasestorage.app',
-  );
 }

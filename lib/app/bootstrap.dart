@@ -5,7 +5,7 @@ import '../firebase_options.dart';
 import '../services/push_notification_service.dart';
 import 'toda_go_app.dart';
 
-enum AppFlavor { mobile, web }
+enum AppFlavor { mobile }
 
 Future<void> bootstrap(AppFlavor flavor) async {
   WidgetsFlutterBinding.ensureInitialized();

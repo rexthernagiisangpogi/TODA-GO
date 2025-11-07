@@ -43,20 +43,20 @@ class PassengerAuthService {
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (!userDoc.exists) {
-        await signOut();
+        _currentPassengerData = null;
         return false;
       }
 
       final userData = userDoc.data()!;
       if (userData['userType'] != 'passenger') {
-        await signOut();
+        _currentPassengerData = null;
         return false;
       }
 
       _currentPassengerData = userData;
       return true;
     } catch (e) {
-      await signOut();
+      _currentPassengerData = null;
       return false;
     }
   }
@@ -73,28 +73,45 @@ class PassengerAuthService {
     print('Password length: ${password.length}');
     
     try {
-      // Create Firebase Auth user
+      // Create Firebase Auth user with retry logic for network issues
       print('Step 1: Creating Firebase Auth user...');
-      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      UserCredential? credential;
+      int retryCount = 0;
+      const maxRetries = 3;
       
-      print('Step 1 SUCCESS: User created with UID: ${credential.user?.uid}');
+      while (credential == null && retryCount < maxRetries) {
+        try {
+          credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+        } catch (e) {
+          retryCount++;
+          print('Registration attempt $retryCount failed: $e');
+          if (retryCount >= maxRetries) {
+            rethrow;
+          }
+          await Future.delayed(Duration(seconds: retryCount * 2));
+        }
+      }
       
-      if (credential.user == null) {
+      print('Step 1 SUCCESS: User created with UID: ${credential?.user?.uid}');
+      
+      if (credential?.user == null) {
         print('ERROR: User is null after creation');
         return 'Account creation failed';
       }
       
+      final user = credential!.user!;
+      
       // Update display name
       print('Step 2: Setting display name...');
-      await credential.user!.updateDisplayName(name);
+      await user.updateDisplayName(name);
       print('Step 2 SUCCESS: Display name set');
       
       // Create Firestore document
       print('Step 3: Creating Firestore document...');
-      await FirebaseFirestore.instance.collection('users').doc(credential.user!.uid).set({
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'name': name,
         'email': email,
         'userType': 'passenger',
@@ -118,6 +135,12 @@ class PassengerAuthService {
       print('=== REGISTRATION FAILED ===');
       print('Error: $e');
       print('Error type: ${e.runtimeType}');
+      print('Error details: ${e.toString()}');
+      
+      // Sign out if user was created but Firestore failed
+      try {
+        await _auth.signOut();
+      } catch (_) {}
       
       if (e.toString().contains('email-already-in-use')) {
         return 'Email already registered. Try logging in instead.';
@@ -128,8 +151,14 @@ class PassengerAuthService {
       if (e.toString().contains('invalid-email')) {
         return 'Invalid email format.';
       }
+      if (e.toString().contains('network-request-failed')) {
+        return 'Network error. Please check your internet connection.';
+      }
+      if (e.toString().contains('permission-denied')) {
+        return 'Permission denied. Please check Firebase configuration.';
+      }
       
-      return 'Registration failed: $e';
+      return 'Registration failed: ${e.toString()}';
     }
   }
   
@@ -139,20 +168,70 @@ class PassengerAuthService {
     required String email,
     required String password,
   }) async {
+    print('=== PASSENGER LOGIN START ===');
+    print('Email: $email');
+    print('Password length: ${password.length}');
+    
     try {
-      await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      print('Step 1: Signing in with Firebase Auth...');
+      
+      // Add retry logic for sign-in
+      int retryCount = 0;
+      const maxRetries = 3;
+      bool signInSuccess = false;
+      
+      while (!signInSuccess && retryCount < maxRetries) {
+        try {
+          await _auth.signInWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+          signInSuccess = true;
+        } catch (e) {
+          retryCount++;
+          print('Sign-in attempt $retryCount failed: $e');
+          if (retryCount >= maxRetries) {
+            rethrow;
+          }
+          await Future.delayed(Duration(seconds: retryCount * 2));
+        }
+      }
+      
+      print('Step 1 SUCCESS: Firebase Auth sign-in complete');
 
-      // Initialize and validate passenger data
-      final success = await initializePassengerData();
-      if (!success) {
-        return "Account not found or not registered as a passenger. Please register as a passenger first.";
+      // Fetch user doc and validate userType == 'passenger'
+      final user = _auth.currentUser;
+      if (user == null) {
+        return 'Authentication failed. Please try again.';
       }
 
+      print('Step 2: Fetching user document...');
+      final doc = await _firestore.collection('users').doc(user.uid).get();
+      if (!doc.exists) {
+        print('Step 2 FAILED: User document does not exist');
+        await signOut();
+        return 'Account not found. Please register as a passenger.';
+      }
+      print('Step 2 SUCCESS: User document found');
+      
+      final data = doc.data() ?? {};
+      print('Step 3: Validating user type...');
+      print('User data: $data');
+      if ((data['userType'] as String?) != 'passenger') {
+        print('Step 3 FAILED: Wrong user type');
+        await signOut();
+        final actual = (data['userType'] as String?) ?? 'driver';
+        return 'This account is registered as a $actual. Please use the correct screen or create a passenger account.';
+      }
+      print('Step 3 SUCCESS: User type validated');
+
+      _currentPassengerData = data;
+      print('=== PASSENGER LOGIN COMPLETE ===');
       return null; // Success
     } catch (e) {
+      print('=== LOGIN FAILED ===');
+      print('Error: $e');
+      print('Error type: ${e.runtimeType}');
       return _getFirebaseErrorMessage(e.toString());
     }
   }

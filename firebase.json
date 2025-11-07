@@ -30,9 +30,7 @@
           "configurations": {
             "android": "1:736872799385:android:3567697b68ff2087e5ac08",
             "ios": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
-            "macos": "1:736872799385:ios:5c51a2490cb1ed55e5ac08",
-            "web": "1:736872799385:web:3fe1802b80762170e5ac08",
-            "windows": "1:736872799385:web:6dc395146648cf25e5ac08"
+            "macos": "1:736872799385:ios:5c51a2490cb1ed55e5ac08"
           }
         }
       }

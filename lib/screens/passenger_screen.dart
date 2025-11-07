@@ -2231,11 +2231,20 @@ class _PassengerScreenState extends State<PassengerScreen> {
     });
 
     try {
-      await _passengerAuthService.registerPassenger(
+      final error = await _passengerAuthService.registerPassenger(
         name: name,
         email: email,
         password: password,
       );
+      
+      if (error != null) {
+        setState(() {
+          _errorMessage = error;
+        });
+        return;
+      }
+      
+      // Registration successful, add phone number if provided
       try {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null && phone.isNotEmpty) {
@@ -2245,6 +2254,7 @@ class _PassengerScreenState extends State<PassengerScreen> {
           );
         }
       } catch (_) {}
+      
       if (mounted) {
         setState(() {
           _isRegistering = false;
@@ -2294,45 +2304,60 @@ class _PassengerScreenState extends State<PassengerScreen> {
     });
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final error = await _passengerAuthService.signIn(
         email: email,
         password: password,
       );
+      
+      if (error != null) {
+        final lower = error.toLowerCase();
+        if (lower.contains('wrong-password')) {
+          setState(() {
+            _passwordError = true;
+            _errorMessage = 'Incorrect Password';
+          });
+        } else if (lower.contains('invalid-email') || lower.contains('user-not-found')) {
+          setState(() {
+            _emailError = true;
+            _errorMessage = 'Incorrect Email';
+          });
+        } else {
+          setState(() {
+            _errorMessage = error;
+          });
+        }
+        return;
+      }
+      
+      // Login successful - clear form and navigate
+      if (mounted) {
+        setState(() {
+          _isRegistering = false;
+          _currentTabIndex = 0;
+        });
+        _clearForm();
+        // Navigate to passenger dashboard
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const PassengerScreen()),
+          (route) => false,
+        );
+      }
     } catch (e) {
-      if (e is FirebaseAuthException) {
-        final code = e.code.toLowerCase();
-        if (code == 'wrong-password') {
-          setState(() {
-            _passwordError = true;
-            _errorMessage = 'Incorrect Password';
-          });
-        } else if (code == 'invalid-email' || code == 'user-not-found') {
-          setState(() {
-            _emailError = true;
-            _errorMessage = 'Incorrect Email';
-          });
-        } else {
-          setState(() {
-            _errorMessage = e.message ?? e.toString();
-          });
-        }
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('wrong-password')) {
+        setState(() {
+          _passwordError = true;
+          _errorMessage = 'Incorrect Password';
+        });
+      } else if (msg.contains('invalid-email') || msg.contains('user-not-found')) {
+        setState(() {
+          _emailError = true;
+          _errorMessage = 'Incorrect Email';
+        });
       } else {
-        final msg = e.toString().toLowerCase();
-        if (msg.contains('wrong-password')) {
-          setState(() {
-            _passwordError = true;
-            _errorMessage = 'Incorrect Password';
-          });
-        } else if (msg.contains('invalid-email') || msg.contains('user-not-found')) {
-          setState(() {
-            _emailError = true;
-            _errorMessage = 'Incorrect Email';
-          });
-        } else {
-          setState(() {
-            _errorMessage = e.toString();
-          });
-        }
+        setState(() {
+          _errorMessage = e.toString();
+        });
       }
     }
   }
@@ -2407,5 +2432,15 @@ class _PassengerScreenState extends State<PassengerScreen> {
         );
       }
     }
+  }
+
+  void _clearForm() {
+    _nameController.clear();
+    _emailController.clear();
+    _passwordController.clear();
+    _phoneController.clear();
+    _passengerCountController.clear();
+    _destinationController.clear();
+    _selectedToda = null; // Reset selection
   }
 }
