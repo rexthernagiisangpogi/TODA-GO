@@ -1337,36 +1337,49 @@ class _DriverScreenState extends State<DriverScreen> {
                   maxNativeZoom: 22,
                 ),
                 MarkerLayer(
-                  markers: pickups.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final dynamic rawLocation = data['location'];
-                    double lat = 0.0;
-                    double lng = 0.0;
-                    if (rawLocation is GeoPoint) {
-                      lat = rawLocation.latitude;
-                      lng = rawLocation.longitude;
-                    } else if (rawLocation is Map<String, dynamic>) {
-                      lat = (rawLocation['lat'] as num?)?.toDouble() ?? 0.0;
-                      lng = (rawLocation['lng'] as num?)?.toDouble() ?? 0.0;
-                    }
-                    if (lat == 0.0 && lng == 0.0) {
-                      return Marker(point: const LatLng(0, 0), child: const SizedBox());
-                    }
-                    final status = data['status'] ?? 'waiting';
-                    return Marker(
-                      point: LatLng(lat, lng),
-                      width: 50,
-                      height: 50,
-                      child: GestureDetector(
-                        onTap: () => _showPassengerInfo(doc),
-                        child: Icon(
-                          Icons.person_pin_circle,
-                          size: 40,
-                          color: _statusColor(status),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                  markers: pickups
+                      .where((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final status = data['status'] ?? 'waiting';
+                        final pickupId = doc.id;
+                        // Only show active rides - exclude cancelled and completed rides
+                        final shouldShow = status != 'cancelled' && status != 'completed';
+                        if (!shouldShow) {
+                          print('Hiding pickup $pickupId with status: $status');
+                        }
+                        return shouldShow;
+                      })
+                      .map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final dynamic rawLocation = data['location'];
+                        double lat = 0.0;
+                        double lng = 0.0;
+                        if (rawLocation is GeoPoint) {
+                          lat = rawLocation.latitude;
+                          lng = rawLocation.longitude;
+                        } else if (rawLocation is Map<String, dynamic>) {
+                          lat = (rawLocation['lat'] as num?)?.toDouble() ?? 0.0;
+                          lng = (rawLocation['lng'] as num?)?.toDouble() ?? 0.0;
+                        }
+                        if (lat == 0.0 && lng == 0.0) {
+                          return Marker(point: const LatLng(0, 0), child: const SizedBox());
+                        }
+                        final status = data['status'] ?? 'waiting';
+                        return Marker(
+                          point: LatLng(lat, lng),
+                          width: 50,
+                          height: 50,
+                          child: GestureDetector(
+                            onTap: () => _showPassengerInfo(doc),
+                            child: Icon(
+                              Icons.person_pin_circle,
+                              size: 40,
+                              color: _statusColor(status),
+                            ),
+                          ),
+                        );
+                      })
+                      .toList(),
                 ),
               ],
             ),

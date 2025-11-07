@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -71,6 +72,20 @@ class PassengerAuthService {
     print('Name: $name');
     print('Email: $email');
     print('Password length: ${password.length}');
+    
+    // TEMPORARY: Development mode bypass for network issues
+    if (kDebugMode && email == 'test@passenger.com' && password == 'test123') {
+      print('=== DEVELOPMENT MODE: Using test credentials for registration ===');
+      _currentPassengerData = {
+        'name': name,
+        'email': 'test@passenger.com',
+        'userType': 'passenger',
+        'role': 'regularPassenger',
+        'uid': 'test-passenger-uid',
+      };
+      print('=== PASSENGER REGISTRATION COMPLETE (DEV MODE) ===');
+      return null; // Success
+    }
     
     try {
       // Create Firebase Auth user with retry logic for network issues
@@ -171,6 +186,20 @@ class PassengerAuthService {
     print('=== PASSENGER LOGIN START ===');
     print('Email: $email');
     print('Password length: ${password.length}');
+    
+    // TEMPORARY: Development mode bypass for network issues
+    if (kDebugMode && email == 'test@passenger.com' && password == 'test123') {
+      print('=== DEVELOPMENT MODE: Using test credentials ===');
+      _currentPassengerData = {
+        'name': 'Test Passenger',
+        'email': 'test@passenger.com',
+        'userType': 'passenger',
+        'role': 'regularPassenger',
+        'uid': 'test-passenger-uid',
+      };
+      print('=== PASSENGER LOGIN COMPLETE (DEV MODE) ===');
+      return null; // Success
+    }
     
     try {
       print('Step 1: Signing in with Firebase Auth...');

@@ -1185,6 +1185,23 @@ class _PassengerScreenState extends State<PassengerScreen> {
                                 'cancelledAt': FieldValue.serverTimestamp(),
                                 'cancelledBy': FirebaseAuth.instance.currentUser?.uid,
                               });
+                              
+                              // Notify drivers that this ride was cancelled
+                              try {
+                                final NotificationService notificationService = NotificationService();
+                                await notificationService.enqueueDriverNotificationForToda(
+                                  toda: _selectedToda ?? '',
+                                  pickupId: pickupId,
+                                  title: 'Ride Cancelled',
+                                  body: 'A passenger has cancelled their ride request',
+                                  data: {
+                                    'type': 'ride_cancelled',
+                                    'pickupId': pickupId,
+                                  },
+                                );
+                              } catch (_) {
+                                // Ignore notification errors
+                              }
                             }
                           } catch (_) {
                             // ignore update errors
