@@ -1,9 +1,100 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow all operations for testing - VERY PERMISSIVE
-    match /{document=**} {
-      allow read, write: if true;
+
+    // Helper to read the requestor's user doc once
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Allow each authenticated user to manage their own user document
+    match /users/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read:   if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      // Optionally restrict which fields can be updated by the user. Example:
+      // allow update: if request.auth.uid == userId
+      //   && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      //     'fcmToken', 'fcmTokenUpdatedAt', 'settings', 'phone', 'name',
+      //     'toda', 'licenseNumber', 'vehicleInfo', 'email', 'role'
+      //   ]);
+    }
+
+    // Pickups: queried by drivers (by TODA + status) and created by passengers
+    match /pickups/{pickupId} {
+      // READ - Allow drivers to read pickups for their TODA and passengers to read their own
+      allow read: if request.auth != null && (
+        // Drivers can read pickups for their TODA (any status for map display)
+        (
+          me().data.userType == 'driver' &&
+          resource.data.toda == me().data.toda
+        )
+        ||
+        // Passengers can read their own pickups
+        (resource.data.passengerId == request.auth.uid)
+        ||
+        // Allow drivers to read pickups assigned to them
+        (
+          me().data.userType == 'driver' &&
+          resource.data.driverId == request.auth.uid
+        )
+      );
+
+      // CREATE: passengers create ride requests
+      allow create: if request.auth != null && me().data.userType == 'passenger'
+        // Minimal required fields; adjust per your schema
+        && request.resource.data.keys().hasAll(['toda', 'status', 'passengerId'])
+        && request.resource.data.passengerId == request.auth.uid;
+
+      // UPDATE: drivers update the pickup they accepted OR assigned driver updates status
+      allow update: if request.auth != null && (
+        // Driver assigning themselves (accept ride): set driverId to auth.uid
+        (
+          me().data.userType == 'driver' &&
+          request.resource.data.driverId == request.auth.uid
+        )
+        ||
+        // Already-assigned driver updates status (onTheWay, arrived, completed, canceled)
+        (
+          me().data.userType == 'driver' &&
+          resource.data.driverId == request.auth.uid
+        )
+        ||
+        // Passenger updates their own pickup (e.g., cancel) — optional
+        (
+          me().data.userType == 'passenger' &&
+          resource.data.passengerId == request.auth.uid
+        )
+      );
+
+      // DELETE: typically not allowed from clients
+      allow delete: if false;
+    }
+
+    // Ratings: allow creating, reading, and updating ratings
+    match /ratings/{ratingId} {
+      // CREATE: allow users to create ratings
+      allow create: if request.auth != null
+        && request.resource.data.raterUserId == request.auth.uid;
+      
+      // READ: allow users to read ratings they created or ratings about them
+      allow read: if request.auth != null && (
+        resource.data.raterUserId == request.auth.uid ||
+        resource.data.ratedUserId == request.auth.uid
+      );
+      
+      // UPDATE: allow users to update ratings they created
+      allow update: if request.auth != null 
+        && resource.data.raterUserId == request.auth.uid;
+      
+      // DELETE: typically not allowed
+      allow delete: if false;
+    }
+
+    // Notifications (if enqueued from the client). Prefer using Cloud Functions; relax only if needed.
+    match /notifications/{docId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if false;
     }
   }
 }

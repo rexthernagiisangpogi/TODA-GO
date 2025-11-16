@@ -8,6 +8,7 @@ class RatingDialog extends StatefulWidget {
   final String? ratedUserId;
   final String? ratedUserName;
   final VoidCallback? onRatingSubmitted;
+  final bool allowUpdate; // Allow updating existing ratings
 
   const RatingDialog({
     super.key,
@@ -16,6 +17,7 @@ class RatingDialog extends StatefulWidget {
     this.ratedUserId,
     this.ratedUserName,
     this.onRatingSubmitted,
+    this.allowUpdate = false,
   });
 
   @override
@@ -28,6 +30,14 @@ class _RatingDialogState extends State<RatingDialog> {
   
   double _rating = 5.0;
   bool _isSubmitting = false;
+  bool _isLoading = true;
+  bool _isUpdating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingRating();
+  }
 
   @override
   void dispose() {
@@ -35,21 +45,54 @@ class _RatingDialogState extends State<RatingDialog> {
     super.dispose();
   }
 
+  Future<void> _loadExistingRating() async {
+    if (widget.allowUpdate) {
+      final existingRating = await _ratingService.getUserRatingForPickup(
+        widget.pickupId,
+        widget.ratingType,
+      );
+      
+      if (existingRating != null) {
+        setState(() {
+          _rating = (existingRating['rating'] as num?)?.toDouble() ?? 5.0;
+          _commentController.text = existingRating['comment'] ?? '';
+          _isUpdating = true;
+        });
+      }
+    }
+    
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
   String get _dialogTitle {
-    if (widget.ratingType == 'driver_rating') {
-      return 'Rate Your Driver';
+    if (_isUpdating) {
+      if (widget.ratingType == 'driver_rating') {
+        return 'Update Driver Rating';
+      } else {
+        return 'Update Rating';
+      }
     } else {
-      return 'Rate Your Experience';
+      if (widget.ratingType == 'driver_rating') {
+        return 'Rate Your Driver';
+      } else {
+        return 'Rate Your Experience';
+      }
     }
   }
 
   String get _dialogSubtitle {
-    if (widget.ratingType == 'driver_rating' && widget.ratedUserName != null) {
-      return 'How was your ride with ${widget.ratedUserName}?';
-    } else if (widget.ratingType == 'passenger_rating' && widget.ratedUserName != null) {
-      return 'How was your experience with ${widget.ratedUserName}?';
+    if (_isUpdating) {
+      return 'Update your previous rating';
     } else {
-      return 'How was your TODA GO experience?';
+      if (widget.ratingType == 'driver_rating' && widget.ratedUserName != null) {
+        return 'How was your ride with ${widget.ratedUserName}?';
+      } else if (widget.ratingType == 'passenger_rating' && widget.ratedUserName != null) {
+        return 'How was your experience with ${widget.ratedUserName}?';
+      } else {
+        return 'How was your TODA GO experience?';
+      }
     }
   }
 
@@ -87,6 +130,31 @@ class _RatingDialogState extends State<RatingDialog> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                'Loading...',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -296,9 +364,9 @@ class _RatingDialogState extends State<RatingDialog> {
                               valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
-                        : const Text(
-                          'Submit Rating',
-                          style: TextStyle(
+                        : Text(
+                          _isUpdating ? 'Update Rating' : 'Submit Rating',
+                          style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                             ),
@@ -319,23 +387,6 @@ class _RatingDialogState extends State<RatingDialog> {
     });
 
     try {
-      // Prevent duplicate ratings for the same pickup and rating type
-      final alreadyRated = await _ratingService.hasUserRated(
-        widget.pickupId,
-        widget.ratingType,
-      );
-      if (alreadyRated) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('You have already submitted a rating for this ride.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
       final comment = _commentController.text.trim();
       
       final error = await _ratingService.submitRating(
@@ -344,6 +395,7 @@ class _RatingDialogState extends State<RatingDialog> {
         ratingType: widget.ratingType,
         comment: comment.isEmpty ? null : comment,
         ratedUserId: widget.ratedUserId,
+        allowUpdate: widget.allowUpdate,
       );
 
       if (error != null) {
@@ -358,9 +410,10 @@ class _RatingDialogState extends State<RatingDialog> {
       } else {
         if (mounted) {
           Navigator.of(context).pop();
+          final actionText = _isUpdating ? 'updated' : 'submitted';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Thank you for your ${_rating.round()}-star rating!'),
+              content: Text('Rating $actionText successfully! ${_rating.round()} stars'),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 3),
             ),
@@ -372,7 +425,7 @@ class _RatingDialogState extends State<RatingDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to submit rating: $e'),
+            content: Text('Failed to ${_isUpdating ? 'update' : 'submit'} rating: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -395,6 +448,7 @@ Future<void> showRatingDialog({
   String? ratedUserId,
   String? ratedUserName,
   VoidCallback? onRatingSubmitted,
+  bool allowUpdate = false,
 }) {
   return showDialog<void>(
     context: context,
@@ -406,6 +460,7 @@ Future<void> showRatingDialog({
         ratedUserId: ratedUserId,
         ratedUserName: ratedUserName,
         onRatingSubmitted: onRatingSubmitted,
+        allowUpdate: allowUpdate,
       );
     },
   );

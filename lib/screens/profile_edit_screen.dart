@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
+import 'dart:convert';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -19,6 +23,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _isDriver = false;
+  
+  // Profile picture variables
+  final ImagePicker _imagePicker = ImagePicker();
+  XFile? _selectedImage;
+  String? _currentProfilePictureUrl;
+  bool _uploadingImage = false;
 
   @override
   void initState() {
@@ -40,6 +50,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _phoneController.text = (data['phone'] as String?) ?? '';
     _licenseController.text = (data['licenseNumber'] as String?) ?? '';
     _vehicleController.text = (data['vehicleInfo'] as String?) ?? '';
+    _currentProfilePictureUrl = (data['profilePictureUrl'] as String?);
     if (mounted) setState(() => _loading = false);
   }
 
@@ -49,10 +60,19 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     if (user == null) return;
     setState(() => _saving = true);
     try {
+      // Upload profile picture if selected
+      String? profilePictureUrl = await _uploadProfilePicture();
+      
       final Map<String, dynamic> payload = {
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
       };
+      
+      // Add profile picture URL if available
+      if (profilePictureUrl != null) {
+        payload['profilePictureUrl'] = profilePictureUrl;
+      }
+      
       if (_isDriver) {
         payload['licenseNumber'] = _licenseController.text.trim();
         payload['vehicleInfo'] = _vehicleController.text.trim();
@@ -74,6 +94,138 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 70,
+      );
+      if (image != null) {
+        setState(() {
+          _selectedImage = image;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+      }
+    }
+  }
+
+  Future<String?> _uploadProfilePicture() async {
+    if (_selectedImage == null) return _currentProfilePictureUrl;
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User not authenticated')),
+        );
+      }
+      return null;
+    }
+
+    setState(() => _uploadingImage = true);
+    
+    try {
+      print('Starting profile picture upload for user: ${user.uid}');
+      
+      // Try Firebase Storage first
+      try {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('profile_pictures/${user.uid}.jpg');
+        
+        print('Storage reference created: ${storageRef.fullPath}');
+        
+        final metadata = SettableMetadata(
+          contentType: 'image/jpeg',
+          customMetadata: {
+            'userId': user.uid,
+            'uploadedAt': DateTime.now().toIso8601String(),
+          },
+        );
+        
+        final uploadTask = storageRef.putFile(File(_selectedImage!.path), metadata);
+        final snapshot = await uploadTask;
+        final downloadUrl = await snapshot.ref.getDownloadURL();
+        
+        print('Firebase Storage upload successful. Download URL: $downloadUrl');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile picture updated successfully!')),
+          );
+        }
+        
+        return downloadUrl;
+      } catch (storageError) {
+        print('Firebase Storage failed, trying Firestore fallback: $storageError');
+        
+        // Fallback: Store as base64 in Firestore (for development)
+        final imageFile = File(_selectedImage!.path);
+        final imageBytes = await imageFile.readAsBytes();
+        final base64String = base64Encode(imageBytes);
+        
+        // Store base64 string with data URI prefix
+        final dataUri = 'data:image/jpeg;base64,$base64String';
+        
+        print('Using Firestore fallback for profile picture storage');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile picture updated (using fallback storage)!')),
+          );
+        }
+        
+        return dataUri;
+      }
+    } catch (e) {
+      print('General upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload image: $e')),
+        );
+      }
+      return null;
+    } finally {
+      if (mounted) setState(() => _uploadingImage = false);
+    }
+  }
+
+  ImageProvider? _getProfileImage() {
+    // Priority 1: Show selected image (preview)
+    if (_selectedImage != null) {
+      return FileImage(File(_selectedImage!.path));
+    }
+    
+    // Priority 2: Show existing profile picture
+    if (_currentProfilePictureUrl != null) {
+      // Check if it's a base64 data URI
+      if (_currentProfilePictureUrl!.startsWith('data:image/')) {
+        try {
+          // Extract base64 data from data URI
+          final base64Data = _currentProfilePictureUrl!.split(',')[1];
+          final bytes = base64Decode(base64Data);
+          return MemoryImage(bytes);
+        } catch (e) {
+          print('Error decoding base64 image: $e');
+          return null;
+        }
+      } else {
+        // Regular network image URL
+        return NetworkImage(_currentProfilePictureUrl!);
+      }
+    }
+    
+    // Priority 3: No image available
+    return null;
   }
 
   @override
@@ -126,13 +278,58 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: [
-                            CircleAvatar(
-                              radius: 32,
-                              backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
-                              child: Icon(
-                                _isDriver ? Icons.directions_car_filled : Icons.person_outline,
-                                size: 32,
-                                color: const Color(0xFF082FBD),
+                            GestureDetector(
+                              onTap: _pickImage,
+                              child: Stack(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 32,
+                                    backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
+                                    backgroundImage: _getProfileImage(),
+                                    child: (_selectedImage == null && _currentProfilePictureUrl == null)
+                                        ? Icon(
+                                            _isDriver ? Icons.directions_car_filled : Icons.person_outline,
+                                            size: 32,
+                                            color: const Color(0xFF082FBD),
+                                          )
+                                        : null,
+                                  ),
+                                  if (_uploadingImage)
+                                    Positioned.fill(
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.5),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Center(
+                                          child: SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF082FBD),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.camera_alt,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(width: 16),

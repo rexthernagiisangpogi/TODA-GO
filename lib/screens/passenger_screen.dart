@@ -8,8 +8,10 @@ import 'package:flutter/services.dart';
 import '../services/passenger_auth_service.dart';
 import 'settings_screen.dart';
 import 'driver_reviews_screen.dart';
+import 'passenger_ratings_screen.dart';
 import '../widgets/rating_dialog.dart';
 import '../widgets/chat_screen.dart';
+import '../widgets/tutorial_helper.dart';
 import '../services/notification_service.dart';
 import '../widgets/rating_display.dart';
 
@@ -87,37 +89,41 @@ class _PassengerScreenState extends State<PassengerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Avoid flashing a loading screen on first entry; show the auth form instead
-          return _buildAuthForm();
-        }
+    return TutorialHelper.wrapWithOnboarding(
+      userType: 'passenger',
+      child: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: Text('Loading...')),
+            );
+          }
 
-        final user = snapshot.data;
-        if (user == null) {
-          return _buildAuthForm();
-        }
+          final user = snapshot.data;
+          if (user == null) {
+            return _buildAuthForm();
+          }
 
-        // Validate that the logged-in user is a passenger before showing dashboard
-        return FutureBuilder<bool>(
-          future: _passengerAuthService.initializePassengerData(),
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: Text('Loading...')),
-              );
-            }
-            final isValidPassenger = snap.data == true;
-            if (!isValidPassenger) {
-              // If not a passenger, fall back to auth form on this screen
-              return _buildAuthForm();
-            }
-            return _buildMainContent();
-          },
-        );
-      },
+          // Validate that the logged-in user is a passenger before showing dashboard
+          return FutureBuilder<bool>(
+            future: _passengerAuthService.initializePassengerData(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: Text('Loading...')),
+                );
+              }
+              final isValidPassenger = snap.data == true;
+              if (!isValidPassenger) {
+                // If not a passenger, fall back to auth form on this screen
+                return _buildAuthForm();
+              }
+              return _buildMainContent();
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -507,15 +513,18 @@ class _PassengerScreenState extends State<PassengerScreen> {
       appBar: AppBar(
         leading: null,
         title: Text(
-          _currentTabIndex == 3
+          _currentTabIndex == 4
               ? 'Passenger Profile'
-              : _currentTabIndex == 2
-                  ? 'Ride History'
-                  : 'Passenger Dashboard',
+              : _currentTabIndex == 3
+                  ? 'My Ratings'
+                  : _currentTabIndex == 2
+                      ? 'Ride History'
+                      : 'Passenger Dashboard',
         ),
         backgroundColor: const Color(0xFF082FBD),
         foregroundColor: Colors.white,
         actions: [
+          TutorialHelper.createHelpButton(context, 'passenger'),
           IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings),
@@ -529,10 +538,12 @@ class _PassengerScreenState extends State<PassengerScreen> {
           ),
         ],
       ),
-      body: _currentTabIndex == 3
+      body: _currentTabIndex == 4
           ? _buildPassengerProfileContent()
-          : _currentTabIndex == 2
-              ? _buildPassengerHistoryContent()
+          : _currentTabIndex == 3
+              ? const PassengerRatingsScreen()
+              : _currentTabIndex == 2
+                  ? _buildPassengerHistoryContent()
               : Stack(
         children: [
           // Full screen map
@@ -656,6 +667,10 @@ class _PassengerScreenState extends State<PassengerScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
             label: 'History',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.star_outline),
+            label: 'Ratings',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),

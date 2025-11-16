@@ -9,9 +9,7 @@ import 'change_email_screen.dart';
 import 'change_password_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_of_service_screen.dart';
-import '../services/localization_service.dart';
 import '../l10n/app_localizations.dart';
-import 'language_selection_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -25,7 +23,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _pushNotifications = true;
   bool _vibrationAlerts = true;
   bool _locationServices = true;
-  String _languageCode = 'en';
 
   // Styled circular icon badge for consistent leading/secondary visuals
   Widget _iconBadge(IconData icon) {
@@ -54,103 +51,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _pushNotifications = (settings['pushNotifications'] as bool?) ?? _pushNotifications;
       _vibrationAlerts = (settings['vibrationAlerts'] as bool?) ?? _vibrationAlerts;
       _locationServices = (settings['locationServices'] as bool?) ?? _locationServices;
-      _languageCode = (settings['language'] as String?) ?? _languageCode;
     });
-    // Apply language to app immediately
-    LocalizationService.instance.setLocaleCode(_languageCode);
   }
 
   Future<void> _saveSetting(String key, bool value) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
-    await userRef.set({'settings.$key': value}, SetOptions(merge: true));
+    await userRef.set({
+      'settings': {key: value}
+    }, SetOptions(merge: true));
   }
 
-  Future<void> _saveLanguage(String code) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    setState(() => _languageCode = code);
-    LocalizationService.instance.setLocaleCode(code);
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({'settings.language': code}, SetOptions(merge: true));
-    if (!mounted) return;
-    final l = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("${l.t('language')}: ${_labelFor(code)}")),
-    );
-  }
-
-  String _labelFor(String code) {
-    switch (code) {
-      case 'fil':
-        return 'Filipino';
-      case 'ceb':
-        return 'Cebuano';
-      case 'es':
-        return 'Español';
-      case 'fr':
-        return 'Français';
-      case 'de':
-        return 'Deutsch';
-      case 'it':
-        return 'Italiano';
-      case 'pt':
-        return 'Português';
-      case 'pt-BR':
-        return 'Português (Brasil)';
-      case 'ru':
-        return 'Русский';
-      case 'uk':
-        return 'Українська';
-      case 'pl':
-        return 'Polski';
-      case 'nl':
-        return 'Nederlands';
-      case 'sv':
-        return 'Svenska';
-      case 'no':
-        return 'Norsk';
-      case 'da':
-        return 'Dansk';
-      case 'fi':
-        return 'Suomi';
-      case 'tr':
-        return 'Türkçe';
-      case 'ar':
-        return 'العربية';
-      case 'he':
-        return 'עברית';
-      case 'fa':
-        return 'فارسی';
-      case 'hi':
-        return 'हिन्दी';
-      case 'id':
-        return 'Bahasa Indonesia';
-      case 'ms':
-        return 'Bahasa Melayu';
-      case 'th':
-        return 'ไทย';
-      case 'vi':
-        return 'Tiếng Việt';
-      case 'zh':
-        return '中文';
-      case 'zh-CN':
-        return '简体中文 (中国)';
-      case 'zh-TW':
-        return '繁體中文 (台灣)';
-      case 'ja':
-        return '日本語';
-      case 'ko':
-        return '한국어';
-      case 'en':
-      default:
-        // For unknown codes, return the raw code (e.g., 'es', 'pt-BR')
-        return code == 'en' ? 'English' : code;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -361,26 +273,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             clipBehavior: Clip.antiAlias,
             child: Column(
               children: [
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  leading: _iconBadge(Icons.language),
-                  title: Text(l.t('language')),
-                  subtitle: Text("${l.t('language_current')}: ${_labelFor(_languageCode)}"),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () async {
-                    final selected = await Navigator.of(context).push<String>(
-                      MaterialPageRoute(
-                        builder: (_) => LanguageSelectionScreen(
-                          currentCode: _languageCode,
-                        ),
-                      ),
-                    );
-                    if (selected != null && selected.isNotEmpty && selected != _languageCode) {
-                      await _saveLanguage(selected);
-                    }
-                  },
-                ),
-                const Divider(height: 1),
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   leading: _iconBadge(Icons.info_outline),

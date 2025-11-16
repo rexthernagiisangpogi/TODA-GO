@@ -10,7 +10,6 @@ import 'widgets/auth_wrapper.dart';
 import 'firebase_options.dart';
 import 'package:toda_go/services/push_notification_service.dart';
 import 'l10n/app_localizations.dart';
-import 'services/localization_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 Future<void> main() async {
@@ -225,31 +224,24 @@ class TodaGoApp extends StatelessWidget {
       builder: (context, authSnap) {
         // If unauthenticated, use system light theme by default
         if (authSnap.data == null) {
-          return ValueListenableBuilder<Locale>(
-            valueListenable: LocalizationService.instance.locale,
-            builder: (context, locale, _) {
-              return MaterialApp(
-                title: 'TODA GO',
-                debugShowCheckedModeBanner: false,
-                theme: _lightTheme(),
-                darkTheme: _darkTheme(),
-                themeMode: ThemeMode.light,
-                locale: locale,
-                localeResolutionCallback: (deviceLocale, supported) => locale,
-                localeListResolutionCallback: (deviceLocales, supported) => locale,
-                supportedLocales: LocalizationService.supportedLocales,
-                localizationsDelegates: [
-                  AppLocalizations.delegate,
-                  GlobalMaterialLocalizations.delegate,
-                  GlobalWidgetsLocalizations.delegate,
-                  GlobalCupertinoLocalizations.delegate,
-                ],
-                home: const AuthWrapper(),
-                routes: {
-                  PassengerScreen.routeName: (_) => const PassengerScreen(),
-                  DriverScreen.routeName: (_) => const DriverScreen(),
-                },
-              );
+          return MaterialApp(
+            title: 'TODA GO',
+            debugShowCheckedModeBanner: false,
+            theme: _lightTheme(),
+            darkTheme: _darkTheme(),
+            themeMode: ThemeMode.light,
+            locale: const Locale('en'),
+            supportedLocales: const [Locale('en')],
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            home: const AuthWrapper(),
+            routes: {
+              PassengerScreen.routeName: (_) => const PassengerScreen(),
+              DriverScreen.routeName: (_) => const DriverScreen(),
             },
           );
         }
@@ -263,64 +255,46 @@ class TodaGoApp extends StatelessWidget {
           builder: (context, userSnap) {
             if (userSnap.hasError) {
               // Ignore user settings errors (e.g., permission-denied) and proceed with defaults
-              return ValueListenableBuilder<Locale>(
-                valueListenable: LocalizationService.instance.locale,
-                builder: (context, locale, _) {
-                  return MaterialApp(
-                    title: 'TODA GO',
-                    debugShowCheckedModeBanner: false,
-                    theme: _lightTheme(),
-                    darkTheme: _darkTheme(),
-                    themeMode: ThemeMode.light,
-                    locale: locale,
-                    localeResolutionCallback: (deviceLocale, supported) => locale,
-                    localeListResolutionCallback: (deviceLocales, supported) => locale,
-                    supportedLocales: LocalizationService.supportedLocales,
-                    localizationsDelegates: [
-                      AppLocalizations.delegate,
-                      GlobalMaterialLocalizations.delegate,
-                      GlobalWidgetsLocalizations.delegate,
-                      GlobalCupertinoLocalizations.delegate,
-                    ],
-                    home: const AuthWrapper(),
-                    routes: {
-                      PassengerScreen.routeName: (_) => const PassengerScreen(),
-                      DriverScreen.routeName: (_) => const DriverScreen(),
-                    },
-                  );
+              return MaterialApp(
+                title: 'TODA GO',
+                debugShowCheckedModeBanner: false,
+                theme: _lightTheme(),
+                darkTheme: _darkTheme(),
+                themeMode: ThemeMode.light,
+                locale: const Locale('en'),
+                supportedLocales: const [Locale('en')],
+                localizationsDelegates: [
+                  AppLocalizations.delegate,
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+                home: const AuthWrapper(),
+                routes: {
+                  PassengerScreen.routeName: (_) => const PassengerScreen(),
+                  DriverScreen.routeName: (_) => const DriverScreen(),
                 },
               );
             }
-            final data = userSnap.data?.data();
-            final settings = (data?['settings'] as Map<String, dynamic>?) ?? {};
-            final langCode = (settings['language'] as String?) ?? 'en';
-            LocalizationService.instance.setLocaleCode(langCode);
             // Dark mode disabled: ignore any stored preference and force light theme
-            return ValueListenableBuilder<Locale>(
-              valueListenable: LocalizationService.instance.locale,
-              builder: (context, locale, _) {
-                return MaterialApp(
-                  title: 'TODA GO',
-                  debugShowCheckedModeBanner: false,
-                  theme: _lightTheme(),
-                  darkTheme: _darkTheme(),
-                  themeMode: ThemeMode.light,
-                  locale: locale,
-                  localeResolutionCallback: (deviceLocale, supported) => locale,
-                  localeListResolutionCallback: (deviceLocales, supported) => locale,
-                  supportedLocales: LocalizationService.supportedLocales,
-                  localizationsDelegates: [
-                    AppLocalizations.delegate,
-                    GlobalMaterialLocalizations.delegate,
-                    GlobalWidgetsLocalizations.delegate,
-                    GlobalCupertinoLocalizations.delegate,
-                  ],
-                  home: const AuthWrapper(),
-                  routes: {
-                    PassengerScreen.routeName: (_) => const PassengerScreen(),
-                    DriverScreen.routeName: (_) => const DriverScreen(),
-                  },
-                );
+            return MaterialApp(
+              title: 'TODA GO',
+              debugShowCheckedModeBanner: false,
+              theme: _lightTheme(),
+              darkTheme: _darkTheme(),
+              themeMode: ThemeMode.light,
+              locale: const Locale('en'),
+              supportedLocales: const [Locale('en')],
+              localizationsDelegates: [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              home: const AuthWrapper(),
+              routes: {
+                PassengerScreen.routeName: (_) => const PassengerScreen(),
+                DriverScreen.routeName: (_) => const DriverScreen(),
               },
             );
           },

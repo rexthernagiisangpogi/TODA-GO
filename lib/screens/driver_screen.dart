@@ -17,6 +17,7 @@ import 'settings_screen.dart';
 import '../widgets/chat_screen.dart';
 import '../services/notification_service.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/tutorial_helper.dart';
 
 enum MapMode { normal, satellite, hybrid }
 
@@ -674,7 +675,9 @@ class _DriverScreenState extends State<DriverScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
+    return TutorialHelper.wrapWithOnboarding(
+      userType: 'driver',
+      child: StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -714,6 +717,7 @@ class _DriverScreenState extends State<DriverScreen> {
           },
         );
       },
+    ),
     );
   }
 
@@ -734,6 +738,7 @@ class _DriverScreenState extends State<DriverScreen> {
         backgroundColor: const Color(0xFF082FBD),
         foregroundColor: Colors.white,
         actions: [
+          TutorialHelper.createHelpButton(context, 'driver'),
           IconButton(
             tooltip: l.t('settings_title'),
             icon: const Icon(Icons.settings),
@@ -1298,26 +1303,21 @@ class _DriverScreenState extends State<DriverScreen> {
 
   /// Leaflet Map with pickups from Firestore
   Widget _buildMapView() {
-    // Require driver's TODA to filter pickups. If not yet loaded, show a light placeholder.
-    if (_driverToda == null || _driverToda!.isEmpty) {
-      return const Center(child: SizedBox.shrink());
-    }
+    // Show map immediately, filter pickups by TODA when available
 
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('pickups')
-          .where('toda', isEqualTo: _driverToda)
-          .snapshots()
-          .handleError((_) {}),
+      stream: _driverToda != null && _driverToda!.isNotEmpty
+          ? FirebaseFirestore.instance
+              .collection('pickups')
+              .where('toda', isEqualTo: _driverToda)
+              .snapshots()
+              .handleError((error) {
+                print('Pickup stream error: $error');
+              })
+          : const Stream.empty(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const Center(child: Text('Error loading pickups'));
-        }
-        if (!snapshot.hasData) {
-          return const Center(child: SizedBox.shrink());
-        }
-
-        final pickups = snapshot.data!.docs;
+        // Always show the map, even if there's an error or no data
+        final pickups = snapshot.hasData ? snapshot.data!.docs : <QueryDocumentSnapshot>[];
 
         return Stack(
           children: [

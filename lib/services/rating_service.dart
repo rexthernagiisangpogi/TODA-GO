@@ -9,13 +9,14 @@ class RatingService {
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   FirebaseAuth get _auth => FirebaseAuth.instance;
 
-  /// Submit a rating for a completed ride
+  /// Submit a rating for a completed ride (handles both new ratings and updates)
   Future<String?> submitRating({
     required String pickupId,
     required double rating,
     required String ratingType, // 'driver_rating' or 'passenger_rating'
     String? comment,
     String? ratedUserId,
+    bool allowUpdate = false, // Allow updating existing ratings
   }) async {
     try {
       final user = _auth.currentUser;
@@ -23,6 +24,26 @@ class RatingService {
 
       if (rating < 1 || rating > 5) return 'Rating must be between 1 and 5 stars';
 
+      // Check if user has already rated this pickup
+      final existingRating = await getUserRatingForPickup(pickupId, ratingType);
+      
+      if (existingRating != null) {
+        if (allowUpdate) {
+          // Update existing rating
+          return await updateRating(
+            ratingId: existingRating['id'],
+            pickupId: pickupId,
+            rating: rating,
+            ratingType: ratingType,
+            comment: comment,
+            ratedUserId: ratedUserId,
+          );
+        } else {
+          return 'You have already submitted a rating for this ride.';
+        }
+      }
+
+      // Create new rating
       final ratingData = {
         'pickupId': pickupId,
         'raterId': user.uid,
@@ -144,6 +165,73 @@ class RatingService {
       return query.docs.isNotEmpty;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Get user's existing rating for a specific pickup
+  Future<Map<String, dynamic>?> getUserRatingForPickup(String pickupId, String ratingType) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return null;
+
+      final query = await _firestore
+          .collection('ratings')
+          .where('pickupId', isEqualTo: pickupId)
+          .where('raterId', isEqualTo: user.uid)
+          .where('ratingType', isEqualTo: ratingType)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) return null;
+
+      final doc = query.docs.first;
+      final data = doc.data();
+      data['id'] = doc.id;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Update an existing rating
+  Future<String?> updateRating({
+    required String ratingId,
+    required String pickupId,
+    required double rating,
+    required String ratingType,
+    String? comment,
+    String? ratedUserId,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return 'User not authenticated';
+
+      if (rating < 1 || rating > 5) return 'Rating must be between 1 and 5 stars';
+
+      final ratingData = {
+        'rating': rating,
+        'comment': comment ?? '',
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Update the rating in the ratings collection
+      await _firestore.collection('ratings').doc(ratingId).update(ratingData);
+
+      // Update the pickup document with the new rating
+      await _firestore.collection('pickups').doc(pickupId).update({
+        ratingType: rating,
+        '${ratingType}_comment': comment ?? '',
+        '${ratingType}_timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Update user's average rating if rating another user
+      if (ratedUserId != null) {
+        await _updateUserAverageRating(ratedUserId, ratingType);
+      }
+
+      return null; // Success
+    } catch (e) {
+      return 'Failed to update rating: ${e.toString()}';
     }
   }
 
