@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 // import 'package:firebase_app_check/firebase_app_check.dart'; // Temporarily disabled
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'screens/passenger_screen.dart';
 import 'screens/driver_screen.dart';
 import 'widgets/auth_wrapper.dart';
