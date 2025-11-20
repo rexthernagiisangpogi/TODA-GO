@@ -38,6 +38,7 @@ class ChatService {
       'senderId': user.uid,
       'senderType': senderType ?? 'unknown',
       'timestamp': now,
+      'read': false,
     });
 
     // Optionally update lastMessage for quick previews

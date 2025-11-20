@@ -237,6 +237,11 @@ class _RatingDialogState extends State<RatingDialog> {
                     ],
                   ),
                 ),
+                IconButton(
+                  onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                  color: Colors.grey.shade600,
+                ),
               ],
             ),
             const SizedBox(height: 32),

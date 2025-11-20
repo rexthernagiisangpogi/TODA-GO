@@ -133,9 +133,12 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: const Icon(
-        Icons.directions_car,
-        size: 90,
+      child: Image.asset(
+        'assets/icons/TODA2.png',
+        width: 90,
+        height: 90,
+        fit: BoxFit.contain,
+        colorBlendMode: BlendMode.srcIn,
         color: Colors.white,
       ),
     );
@@ -190,9 +193,11 @@ class HomeScreen extends StatelessWidget {
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) {
           // Fallback to default icon if asset not found
-          return const Icon(
-            Icons.directions_car,
-            size: 28,
+          return Image.asset(
+            'assets/icons/TODA2.png',
+            width: 28,
+            height: 28,
+            fit: BoxFit.contain,
             color: Colors.white,
           );
         },

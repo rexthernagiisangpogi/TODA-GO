@@ -37,31 +37,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       return [
         OnboardingSlide(
           title: 'Welcome to TODA GO',
-          description: 'Your reliable tricycle booking app for convenient transportation',
+          description: 'Your reliable TODA tricycle booking app for convenient and safe transportation',
           icon: Icons.waving_hand,
           color: const Color(0xFF082FBD),
         ),
         OnboardingSlide(
           title: 'Book Your Ride',
-          description: 'Tap on the map to set your pickup location and request a tricycle',
+          description: 'Tap on the map to set your pickup location and request a TODA tricycle driver',
           icon: Icons.location_on,
           color: const Color(0xFF3D64FF),
         ),
         OnboardingSlide(
-          title: 'Track Your Driver',
-          description: 'See your driver\'s location in real-time and get updates on your ride',
-          icon: Icons.directions_bike,
+          title: 'Meet Your Driver',
+          description: 'View your driver\'s profile, photo, and real-time ratings. Track their location as they arrive',
+          icon: Icons.person_pin_circle,
           color: const Color(0xFF5B7CFF),
+          useCustomIcon: true,
         ),
         OnboardingSlide(
-          title: 'Chat & Rate',
-          description: 'Communicate with your driver and rate your experience after the ride',
-          icon: Icons.chat_bubble_outline,
+          title: 'Safe & Connected',
+          description: 'See driver details before your ride. Rate your experience to help maintain quality service',
+          icon: Icons.star_outline,
           color: const Color(0xFF7A94FF),
         ),
         OnboardingSlide(
           title: 'You\'re All Set!',
-          description: 'Start booking your rides and enjoy convenient transportation with TODA GO',
+          description: 'Start booking rides with verified TODA drivers and enjoy convenient transportation',
           icon: Icons.check_circle,
           color: const Color(0xFF4CAF50),
         ),
@@ -69,32 +70,33 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } else {
       return [
         OnboardingSlide(
-          title: 'Welcome Driver!',
-          description: 'Join TODA GO and start earning by providing tricycle rides',
+          title: 'Welcome TODA Driver!',
+          description: 'Join TODA GO and start earning by providing safe tricycle rides to passengers',
           icon: Icons.waving_hand,
           color: const Color(0xFF082FBD),
         ),
         OnboardingSlide(
-          title: 'Go Online',
-          description: 'Toggle your status to online to start receiving ride requests from passengers',
-          icon: Icons.power_settings_new,
+          title: 'Set Up Your Profile',
+          description: 'Add your TODA affiliation, vehicle info, and license details. Your profile helps passengers trust you',
+          icon: Icons.badge_outlined,
           color: const Color(0xFF3D64FF),
+          useCustomIcon: true,
         ),
         OnboardingSlide(
-          title: 'Accept Requests',
-          description: 'Review ride requests and accept those that work for you',
-          icon: Icons.check_circle_outline,
+          title: 'Go Online & Accept',
+          description: 'Toggle online to receive ride requests. View passenger details and location before accepting',
+          icon: Icons.power_settings_new,
           color: const Color(0xFF5B7CFF),
         ),
         OnboardingSlide(
-          title: 'Navigate & Complete',
-          description: 'Use the built-in navigation to reach passengers and complete rides safely',
+          title: 'Complete Rides',
+          description: 'Navigate to pickup location, complete the ride safely, and receive your payment',
           icon: Icons.navigation,
           color: const Color(0xFF7A94FF),
         ),
         OnboardingSlide(
-          title: 'Earn & Grow',
-          description: 'Build your reputation with good ratings and earn more with TODA GO',
+          title: 'Build Your Reputation',
+          description: 'Earn ratings from passengers. View your rating history and grow your TODA business',
           icon: Icons.trending_up,
           color: const Color(0xFF4CAF50),
         ),
@@ -267,11 +269,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: 2,
               ),
             ),
-            child: Icon(
-              slide.icon,
-              size: 60,
-              color: slide.color,
-            ),
+            child: slide.useCustomIcon
+                ? Image.asset(
+                    'assets/icons/TODA2.png',
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.contain,
+                    color: slide.color,
+                  )
+                : Icon(
+                    slide.icon,
+                    size: 60,
+                    color: slide.color,
+                  ),
           ),
           
           const SizedBox(height: 40),
@@ -336,12 +346,14 @@ class OnboardingSlide {
   final String description;
   final IconData icon;
   final Color color;
+  final bool useCustomIcon;
 
   OnboardingSlide({
     required this.title,
     required this.description,
     required this.icon,
     required this.color,
+    this.useCustomIcon = false,
   });
 }
 

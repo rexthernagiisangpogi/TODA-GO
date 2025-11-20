@@ -9,9 +9,8 @@ service cloud.firestore {
 
     // Allow each authenticated user to manage their own user document
     match /users/{userId} {
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow read:   if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
+      allow get, list: if request.auth != null; // Allow all authenticated users to read profiles
+      allow create, update, delete: if request.auth != null && request.auth.uid == userId;
       // Optionally restrict which fields can be updated by the user. Example:
       // allow update: if request.auth.uid == userId
       //   && request.resource.data.diff(resource.data).changedKeys().hasOnly([
@@ -54,7 +53,7 @@ service cloud.firestore {
           request.resource.data.driverId == request.auth.uid
         )
         ||
-        // Already-assigned driver updates status (onTheWay, arrived, completed, canceled)
+        // Already-assigned driver updates status (onTheWay, completed, canceled)
         (
           me().data.userType == 'driver' &&
           resource.data.driverId == request.auth.uid
@@ -69,23 +68,58 @@ service cloud.firestore {
 
       // DELETE: typically not allowed from clients
       allow delete: if false;
+
+      // Messages subcollection: allow driver and passenger to read/write messages
+      match /messages/{messageId} {
+        // READ: Allow driver and passenger of the pickup to read messages
+        allow read: if request.auth != null && (
+          // Driver can read if they are assigned to this pickup
+          (
+            me().data.userType == 'driver' &&
+            get(/databases/$(database)/documents/pickups/$(pickupId)).data.driverId == request.auth.uid
+          )
+          ||
+          // Passenger can read if this is their pickup
+          (
+            me().data.userType == 'passenger' &&
+            get(/databases/$(database)/documents/pickups/$(pickupId)).data.passengerId == request.auth.uid
+          )
+        );
+
+        // CREATE: Allow driver and passenger to send messages
+        allow create: if request.auth != null && (
+          // Driver can send if they are assigned to this pickup
+          (
+            me().data.userType == 'driver' &&
+            get(/databases/$(database)/documents/pickups/$(pickupId)).data.driverId == request.auth.uid &&
+            request.resource.data.senderId == request.auth.uid
+          )
+          ||
+          // Passenger can send if this is their pickup
+          (
+            me().data.userType == 'passenger' &&
+            get(/databases/$(database)/documents/pickups/$(pickupId)).data.passengerId == request.auth.uid &&
+            request.resource.data.senderId == request.auth.uid
+          )
+        ) && request.resource.data.keys().hasAll(['text', 'senderId', 'senderType', 'timestamp']);
+
+        // UPDATE/DELETE: Messages are immutable once sent
+        allow update, delete: if false;
+      }
     }
 
     // Ratings: allow creating, reading, and updating ratings
     match /ratings/{ratingId} {
       // CREATE: allow users to create ratings
       allow create: if request.auth != null
-        && request.resource.data.raterUserId == request.auth.uid;
+        && request.resource.data.raterId == request.auth.uid;
       
-      // READ: allow users to read ratings they created or ratings about them
-      allow read: if request.auth != null && (
-        resource.data.raterUserId == request.auth.uid ||
-        resource.data.ratedUserId == request.auth.uid
-      );
+      // READ: allow all authenticated users to read ratings
+      allow read: if request.auth != null;
       
       // UPDATE: allow users to update ratings they created
       allow update: if request.auth != null 
-        && resource.data.raterUserId == request.auth.uid;
+        && resource.data.raterId == request.auth.uid;
       
       // DELETE: typically not allowed
       allow delete: if false;

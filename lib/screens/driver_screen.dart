@@ -11,13 +11,15 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:firebase_storage/firebase_storage.dart';
 import '../services/driver_auth_service.dart';
 import '../services/vibration_service.dart';
-import '../widgets/rating_dialog.dart';
 import '../widgets/auth_wrapper.dart';
 import 'settings_screen.dart';
 import '../widgets/chat_screen.dart';
 import '../services/notification_service.dart';
+import '../services/image_upload_service.dart';
+import '../services/unread_message_service.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/tutorial_helper.dart';
+import 'dart:convert';
 
 enum MapMode { normal, satellite, hybrid }
 
@@ -53,6 +55,12 @@ class _DriverScreenState extends State<DriverScreen> {
   String _loginError = '';
   bool _emailError = false;
   bool _passwordError = false;
+  // Registration field errors
+  bool _nameError = false;
+  bool _phoneError = false;
+  bool _licenseError = false;
+  bool _vehicleError = false;
+  bool _todaError = false;
   
   // Shared TODA options
   final List<String> _todaOptions = const [
@@ -71,9 +79,6 @@ class _DriverScreenState extends State<DriverScreen> {
   
   // Settings
   bool _vibrationEnabled = true;
-  StreamSubscription<DocumentSnapshot>? _settingsSub;
-  StreamSubscription<DocumentSnapshot>? _driverTodaSub;
-  StreamSubscription<User?>? _authSub;
 
   // Bottom navigation: 0 = Map, 1 = History, 2 = Profile
   int _currentTabIndex = 0;
@@ -98,12 +103,13 @@ class _DriverScreenState extends State<DriverScreen> {
   void initState() {
     super.initState();
     _listenToPickupUpdates();
+    // Listen to user settings and TODA updates
     _listenToUserSettings();
     _listenToDriverToda();
     // Initialize FCM for driver
     NotificationService().initialize(context: context);
     // Force dashboard when authenticated
-    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+    FirebaseAuth.instance.authStateChanges().listen((user) {
       if (!mounted) return;
       if (user != null) {
         setState(() {
@@ -114,28 +120,51 @@ class _DriverScreenState extends State<DriverScreen> {
     });
   }
 
-  Future<void> _markArrived(String pickupId) async {
+  Future<void> _markOnTheWay(String pickupId) async {
     final user = _driverAuthService.currentUser;
     if (user == null) return;
 
+    // Get pickup data to check if driverId was already set
+    final pickupDoc = await FirebaseFirestore.instance.collection('pickups').doc(pickupId).get();
+    final pickupData = pickupDoc.data();
+    final wasAlreadyAccepted = pickupData?['driverId'] != null && pickupData?['driverId'] == user.uid;
+    final previousStatus = pickupData?['status'] as String?;
+
     await FirebaseFirestore.instance.collection('pickups').doc(pickupId).update({
-      'status': 'arrived',
+      'status': 'onTheWay',
       'driverId': user.uid,
     });
 
-    _showMessage("Marked as Arrived!");
+    _showMessage("Marked as On The Way!");
 
-    // Notify passenger that driver has arrived
+    // Notify passenger that their ride has been accepted and driver is on the way
     try {
-      await NotificationService().enqueuePassengerNotificationForPickup(
-        pickupId: pickupId,
-        title: 'Driver has arrived',
-        body: 'Your driver has arrived at your location.',
-        data: {
-          'type': 'arrived',
-          'pickupId': pickupId,
-        },
-      );
+      // If this is the first time accepting (status was 'waiting' and no driverId was set),
+      // send a notification that the ride has been accepted
+      if (previousStatus == 'waiting' && !wasAlreadyAccepted) {
+        await NotificationService().enqueuePassengerNotificationForPickup(
+          pickupId: pickupId,
+          title: 'Ride Accepted!',
+          body: 'Your ride has been accepted. Driver is on the way to your location.',
+          data: {
+            'type': 'ride_accepted',
+            'pickupId': pickupId,
+          },
+        );
+      } else {
+        // If already accepted, just notify that driver is on the way
+        await NotificationService().enqueuePassengerNotificationForPickup(
+          pickupId: pickupId,
+          title: 'Driver is on the way',
+          body: 'Your driver is heading to your location.',
+          data: {
+            'type': 'on_the_way',
+            'pickupId': pickupId,
+          },
+        );
+      }
+      // Optional: subscribe driver to pickup topic for per-ride updates
+      await NotificationService().subscribeToPickupTopic(pickupId);
     } catch (_) {}
   }
 
@@ -178,57 +207,122 @@ class _DriverScreenState extends State<DriverScreen> {
                   );
                 }
 
-                return ListView.separated(
-                  itemCount: snapshot.data!.docs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
-                    final comment = (data['comment'] as String?)?.trim() ?? '';
-                    final pickupId = (data['pickupId'] ?? '').toString();
-                    final ts = data['timestamp'];
-                    String when = '';
-                    if (ts is Timestamp) {
-                      final dt = ts.toDate();
-                      when = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-                    }
+                final docs = snapshot.data!.docs;
+                double sum = 0;
+                for (final doc in docs) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  sum += (data['rating'] as num?)?.toDouble() ?? 0.0;
+                }
+                final count = docs.length;
+                final avg = count == 0 ? 0.0 : sum / count;
 
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: const Color(0xFF082FBD).withOpacity(0.1),
-                        child: const Icon(Icons.star, color: Color(0xFF082FBD)),
-                      ),
-                      title: Row(
-                        children: [
-                          Icon(Icons.star, color: Colors.amber.shade700, size: 18),
-                          const SizedBox(width: 4),
-                          Text(
-                            rating.toStringAsFixed(1),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          if (when.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Text('• $when', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                          ],
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (comment.isNotEmpty) Text(comment),
-                          if (pickupId.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0),
-                              child: Text(
-                                '#$pickupId',
-                                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                return Column(
+                  children: [
+                    Card(
+                      elevation: 2,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 52,
+                              height: 52,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF082FBD).withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.star, color: Color(0xFF082FBD)),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Overall Rating',
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    count == 1 ? '1 rating' : '$count ratings',
+                                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                  ),
+                                ],
                               ),
                             ),
-                        ],
+                            Text(
+                              avg.toStringAsFixed(1),
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF082FBD),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final doc = docs[index];
+                          final data = doc.data() as Map<String, dynamic>;
+                          final rating = (data['rating'] as num?)?.toDouble() ?? 0.0;
+                          final comment = (data['comment'] as String?)?.trim() ?? '';
+                          final pickupId = (data['pickupId'] ?? '').toString();
+                          final ts = data['timestamp'];
+                          String when = '';
+                          if (ts is Timestamp) {
+                            final dt = ts.toDate();
+                            when = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+                          }
+
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: const Color(0xFF082FBD).withOpacity(0.1),
+                              child: const Icon(Icons.star, color: Color(0xFF082FBD)),
+                            ),
+                            title: Row(
+                              children: [
+                                Icon(Icons.star, color: Colors.amber.shade700, size: 18),
+                                const SizedBox(width: 4),
+                                Text(
+                                  rating.toStringAsFixed(1),
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                if (when.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Text('• $when', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                ],
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (comment.isNotEmpty)
+                                  Text(
+                                    comment,
+                                    style: const TextStyle(height: 1.3),
+                                  ),
+                                if (pickupId.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Text(
+                                      '#$pickupId',
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -247,8 +341,8 @@ class _DriverScreenState extends State<DriverScreen> {
 
     await showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Edit TODA'),
           content: Column(
@@ -267,7 +361,7 @@ class _DriverScreenState extends State<DriverScreen> {
                     hint: const Text('Select a TODA'),
                     items: _todaOptions.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                     onChanged: (v) {
-                      setState(() {
+                      setDialogState(() {
                         tempToda = v;
                       });
                     },
@@ -303,8 +397,8 @@ class _DriverScreenState extends State<DriverScreen> {
               child: const Text('Save'),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -346,6 +440,7 @@ class _DriverScreenState extends State<DriverScreen> {
                   final licenseNumber = (userData?['licenseNumber'] ?? 'Not provided').toString();
                   final vehicleInfo = (userData?['vehicleInfo'] ?? 'Not provided').toString();
                   final toda = userData?['toda'] as String?;
+                  final profileImageUrl = userData?['profileImageUrl'] as String?;
 
                   return Column(
                     children: [
@@ -357,10 +452,51 @@ class _DriverScreenState extends State<DriverScreen> {
                           padding: const EdgeInsets.all(16),
                           child: Row(
                             children: [
-                              CircleAvatar(
-                                radius: 32,
-                                backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
-                                child: const Icon(Icons.person, color: Color(0xFF082FBD), size: 32),
+                              Stack(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 32,
+                                    backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
+                                    backgroundImage: profileImageUrl != null
+                                        ? (profileImageUrl.startsWith('data:image/')
+                                            ? MemoryImage(base64Decode(profileImageUrl.split(',')[1]))
+                                            : NetworkImage(profileImageUrl) as ImageProvider)
+                                        : null,
+                                    child: profileImageUrl == null ? const Icon(Icons.person, color: Color(0xFF082FBD), size: 32) : null,
+                                  ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        try {
+                                          final imageService = ImageUploadService();
+                                          final result = await imageService.pickAndUploadProfileImage();
+                                          if (result != null && mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Profile picture updated!'), backgroundColor: Colors.green),
+                                            );
+                                          }
+                                        } catch (e) {
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Failed to upload: $e'), backgroundColor: Colors.red),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF082FBD),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: Colors.white, width: 2),
+                                        ),
+                                        child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(width: 16),
                               Expanded(
@@ -389,36 +525,20 @@ class _DriverScreenState extends State<DriverScreen> {
                                               color: Colors.green.withOpacity(0.12),
                                               borderRadius: BorderRadius.circular(20),
                                             ),
-                                            child: const Row(
+                                            child: Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Icon(Icons.local_taxi, size: 16, color: Colors.green),
-                                                SizedBox(width: 6),
-                                                Text('Driver', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600)),
+                                                Image.asset(
+                                                  'assets/icons/TODA2.png',
+                                                  width: 16,
+                                                  height: 16,
+                                                  fit: BoxFit.contain,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                const Text('Driver', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600)),
                                               ],
                                             ),
                                           ),
-                                          if (toda != null && toda.isNotEmpty) ...[
-                                            const SizedBox(width: 8),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFF082FBD).withOpacity(0.10),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Image.asset('assets/icons/TODA2.png', width: 16, height: 16, color: const Color(0xFF082FBD)),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    toda,
-                                                    style: const TextStyle(color: Color(0xFF082FBD), fontWeight: FontWeight.w600),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
                                         ],
                                       ),
                                     ),
@@ -456,7 +576,13 @@ class _DriverScreenState extends State<DriverScreen> {
                               const SizedBox(height: 12),
                               _buildInfoItem(Icons.badge_outlined, 'License', licenseNumber),
                               const SizedBox(height: 12),
-                              _buildInfoItem(Icons.directions_car_outlined, 'Vehicle', vehicleInfo),
+                              _buildInfoItem(null, 'Vehicle', vehicleInfo, customIcon: Image.asset(
+                                'assets/icons/TODA2.png',
+                                width: 20,
+                                height: 20,
+                                fit: BoxFit.contain,
+                                color: Colors.grey.shade600,
+                              )),
                               const SizedBox(height: 12),
                               // Driver TODA with edit action
                               Row(
@@ -527,25 +653,7 @@ class _DriverScreenState extends State<DriverScreen> {
     );
   }
 
-  
-
-  
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _phoneController.dispose();
-    _licenseController.dispose();
-    _vehicleController.dispose();
-    _settingsSub?.cancel();
-    _driverTodaSub?.cancel();
-    _authSub?.cancel();
-    super.dispose();
-  }
-
-  // Capture driver's license image using camera
+  /// Capture driver's license image using camera
   Future<void> _captureLicenseImage() async {
     setState(() {
       _ocrError = null;
@@ -626,6 +734,7 @@ class _DriverScreenState extends State<DriverScreen> {
         if (!mounted) return;
         setState(() {
           _licenseController.text = extracted;
+          _licenseError = false; // Clear license error when license is captured
           _ocrError = null;
         });
       } else {
@@ -680,17 +789,12 @@ class _DriverScreenState extends State<DriverScreen> {
       child: StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Avoid flashing a loading screen on first entry; show the login form instead
-          return _buildLoginScreen();
-        }
-
         final user = snapshot.data;
         if (user == null) {
           return _buildLoginScreen();
         }
 
-        // Validate that the logged-in user is a driver before showing dashboard
+        // User is authenticated, validate driver status
         return FutureBuilder<bool>(
           future: () async {
             // 1) If sign-in already set local driver data, accept immediately
@@ -709,7 +813,7 @@ class _DriverScreenState extends State<DriverScreen> {
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Scaffold(
-                body: Center(child: Text('Loading...')),
+                body: Center(child: CircularProgressIndicator()),
               );
             }
             final isValidDriver = snap.data == true;
@@ -723,6 +827,12 @@ class _DriverScreenState extends State<DriverScreen> {
 
   Widget _buildDriverScreen(User? user, bool isValidDriver) {
     final l = AppLocalizations.of(context);
+    
+    // If validation failed, show the login form
+    if (user != null && !isValidDriver) {
+      return _buildLoginScreen();
+    }
+    
     return Scaffold(
       appBar: AppBar(
         leading: null,
@@ -752,59 +862,52 @@ class _DriverScreenState extends State<DriverScreen> {
           ),
         ],
       ),
-      body: (user != null && isValidDriver)
-          ? (_currentTabIndex == 3
-              ? _buildDriverProfileContent()
-              : _currentTabIndex == 2
-                  ? _buildDriverRatingsContent()
-                  : _currentTabIndex == 1
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 0),
-                          child: _buildPickupHistoryContent(),
-                        )
-                      : _buildMapView())
-          : (user != null
-              // If authenticated but validation hasn't confirmed driver yet, keep a calm loading state
-              ? const Center(child: Text('Loading...'))
-              : _buildAuthForm()),
-      bottomNavigationBar: (user != null && isValidDriver)
-          ? BottomNavigationBar(
-              currentIndex: _currentTabIndex,
-              onTap: (index) {
-                setState(() {
-                  _currentTabIndex = index;
-                });
-              },
-              showSelectedLabels: true,
-              showUnselectedLabels: true,
-              type: BottomNavigationBarType.fixed,
-              selectedItemColor: const Color(0xFF082FBD),
-              unselectedItemColor: Colors.grey,
-              selectedIconTheme: const IconThemeData(size: 28),
-              unselectedIconTheme: const IconThemeData(size: 22),
-              selectedFontSize: 14,
-              unselectedFontSize: 12,
-              selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
-              items: [
-                BottomNavigationBarItem(
-                  icon: const Icon(Icons.map_outlined),
-                  label: l.t('map'),
-                ),
-                BottomNavigationBarItem(
-                  icon: const Icon(Icons.history),
-                  label: l.t('history'),
-                ),
-                BottomNavigationBarItem(
-                  icon: const Icon(Icons.star),
-                  label: l.t('ratings'),
-                ),
-                BottomNavigationBarItem(
-                  icon: const Icon(Icons.person_outline),
-                  label: l.t('profile_nav'),
-                ),
-              ],
-            )
-          : null,
+      body: _currentTabIndex == 3
+          ? _buildDriverProfileContent()
+          : _currentTabIndex == 2
+              ? _buildDriverRatingsContent()
+              : _currentTabIndex == 1
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 0),
+                      child: _buildPickupHistoryContent(),
+                    )
+                  : _buildMapView(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentTabIndex,
+        onTap: (index) {
+          setState(() {
+            _currentTabIndex = index;
+          });
+        },
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: const Color(0xFF082FBD),
+        unselectedItemColor: Colors.grey,
+        selectedIconTheme: const IconThemeData(size: 28),
+        unselectedIconTheme: const IconThemeData(size: 22),
+        selectedFontSize: 14,
+        unselectedFontSize: 12,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
+        items: [
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.map_outlined),
+            label: l.t('map'),
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.history),
+            label: l.t('history'),
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.star),
+            label: l.t('ratings'),
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.person_outline),
+            label: l.t('profile_nav'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -831,7 +934,7 @@ class _DriverScreenState extends State<DriverScreen> {
   void _listenToUserSettings() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    _settingsSub = FirebaseFirestore.instance
+    FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .snapshots()
@@ -854,7 +957,7 @@ class _DriverScreenState extends State<DriverScreen> {
   void _listenToDriverToda() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    _driverTodaSub = FirebaseFirestore.instance
+    FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .snapshots()
@@ -977,20 +1080,58 @@ class _DriverScreenState extends State<DriverScreen> {
                     TextField(
                       controller: _nameController,
                       textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
+                      onChanged: (_) {
+                        if (_nameError) {
+                          setState(() {
+                            _nameError = false;
+                          });
+                        }
+                      },
+                      decoration: InputDecoration(
                         labelText: "Full Name",
-                        prefixIcon: Icon(Icons.person_outline),
+                        prefixIcon: const Icon(Icons.person_outline),
                         hintText: "Enter your full name",
+                        enabledBorder: _nameError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade300),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        focusedBorder: _nameError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade400, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
+                      onChanged: (_) {
+                        if (_phoneError) {
+                          setState(() {
+                            _phoneError = false;
+                          });
+                        }
+                      },
+                      decoration: InputDecoration(
                         labelText: "Phone Number",
-                        prefixIcon: Icon(Icons.phone_outlined),
+                        prefixIcon: const Icon(Icons.phone_outlined),
                         hintText: "Enter your phone number",
+                        enabledBorder: _phoneError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade300),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        focusedBorder: _phoneError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade400, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -998,6 +1139,14 @@ class _DriverScreenState extends State<DriverScreen> {
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    onChanged: (_) {
+                      if (_emailError) {
+                        setState(() {
+                          _emailError = false;
+                          _loginError = '';
+                        });
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: "Email Address",
                       prefixIcon: const Icon(Icons.email_outlined),
@@ -1020,6 +1169,14 @@ class _DriverScreenState extends State<DriverScreen> {
                   TextField(
                     controller: _passwordController,
                     obscureText: _passwordObscured,
+                    onChanged: (_) {
+                      if (_passwordError) {
+                        setState(() {
+                          _passwordError = false;
+                          _loginError = '';
+                        });
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: "Password",
                       prefixIcon: const Icon(Icons.lock_outline),
@@ -1075,29 +1232,35 @@ class _DriverScreenState extends State<DriverScreen> {
                   if (_isRegistering) ...[
                     const SizedBox(height: 12),
                     // Read-only display for driver's license number (auto-filled via OCR)
-                    Visibility(
-                      visible: _licenseController.text.isNotEmpty,
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: "Driver's License Number",
-                          prefixIcon: Icon(Icons.credit_card),
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text(
-                          _licenseController.text.isNotEmpty
-                              ? _licenseController.text
-                              : 'Capture to auto-fill',
-                          style: TextStyle(
-                            color: _licenseController.text.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
-                            fontWeight: FontWeight.w600,
-                          ),
+                    InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: "Driver's License Number",
+                        prefixIcon: const Icon(Icons.credit_card),
+                        border: const OutlineInputBorder(),
+                        enabledBorder: _licenseError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade300),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        focusedBorder: _licenseError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade400, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        _licenseController.text.isNotEmpty
+                            ? _licenseController.text
+                            : 'Capture to auto-fill',
+                        style: TextStyle(
+                          color: _licenseController.text.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                    Visibility(
-                      visible: _licenseController.text.isNotEmpty,
-                      child: const SizedBox(height: 12),
-                    ),
+                    const SizedBox(height: 12),
                     // capture button moved below TODA selector
                     if (_licenseImage != null) ...[
                       const SizedBox(height: 12),
@@ -1144,6 +1307,13 @@ class _DriverScreenState extends State<DriverScreen> {
                     TextField(
                       controller: _vehicleController,
                       textCapitalization: TextCapitalization.words,
+                      onChanged: (_) {
+                        if (_vehicleError) {
+                          setState(() {
+                            _vehicleError = false;
+                          });
+                        }
+                      },
                       decoration: InputDecoration(
                         labelText: "Tricycle Number",
                         prefixIcon: Padding(
@@ -1155,14 +1325,38 @@ class _DriverScreenState extends State<DriverScreen> {
                             color: Colors.grey.shade600,
                           ),
                         ),
+                        enabledBorder: _vehicleError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade300),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        focusedBorder: _vehicleError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade400, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 16),
                     InputDecorator(
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: "TODA",
-                        prefixIcon: Icon(Icons.apartment_outlined),
-                        border: OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.apartment_outlined),
+                        border: const OutlineInputBorder(),
+                        enabledBorder: _todaError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade300),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
+                        focusedBorder: _todaError
+                            ? OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.red.shade400, width: 2),
+                                borderRadius: BorderRadius.circular(12),
+                              )
+                            : null,
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
@@ -1189,6 +1383,7 @@ class _DriverScreenState extends State<DriverScreen> {
                             if (newValue != null) {
                               setState(() {
                                 _selectedToda = newValue;
+                                _todaError = false;
                               });
                             }
                           },
@@ -1341,11 +1536,26 @@ class _DriverScreenState extends State<DriverScreen> {
                       .where((doc) {
                         final data = doc.data() as Map<String, dynamic>;
                         final status = data['status'] ?? 'waiting';
+                        final driverId = data['driverId'] as String?;
+                        final currentDriverId = _driverAuthService.currentUser?.uid;
                         final pickupId = doc.id;
-                        // Only show active rides - exclude cancelled and completed rides
-                        final shouldShow = status != 'cancelled' && status != 'completed';
+                        
+                        // Only show active rides - exclude cancelled, completed, and arrived rides
+                        final statusLower = status.toString().toLowerCase();
+                        final isActiveStatus = statusLower != 'cancelled' && 
+                                         statusLower != 'canceled' && 
+                                         statusLower != 'completed' && 
+                                         statusLower != 'arrived';
+                        
+                        // Hide rides accepted by other drivers
+                        final isAcceptedByOther = driverId != null && 
+                                                  driverId.isNotEmpty && 
+                                                  driverId != currentDriverId;
+                        
+                        final shouldShow = isActiveStatus && !isAcceptedByOther;
+                        
                         if (!shouldShow) {
-                          print('Hiding pickup $pickupId with status: $status');
+                          print('Hiding pickup $pickupId with status: $status, driverId: $driverId');
                         }
                         return shouldShow;
                       })
@@ -1460,14 +1670,7 @@ class _DriverScreenState extends State<DriverScreen> {
                     const SizedBox(height: 6),
                     Text('Please check your connection and try again', style: TextStyle(color: Colors.grey.shade600)),
                     const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () => setState(() {}),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF082FBD),
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Retry'),
-                    ),
+
                   ],
                 ),
               ),
@@ -1504,13 +1707,7 @@ class _DriverScreenState extends State<DriverScreen> {
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              setState(() {});
-              await Future.delayed(const Duration(milliseconds: 500));
-            },
-            color: const Color(0xFF082FBD),
-            child: ListView.builder(
+          return ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: data.length,
               itemBuilder: (context, index) {
@@ -1628,14 +1825,43 @@ class _DriverScreenState extends State<DriverScreen> {
                               ],
                             ),
                           ],
+                          // Chat button for completed rides
+                          if (status.toString().toLowerCase() == 'completed' && passengerId.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ChatScreen(
+                                        pickupId: pickup.id,
+                                        title: 'Chat History',
+                                        senderType: 'driver',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                                label: const Text('View Chat History'),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: Color(0xFF082FBD)),
+                                  foregroundColor: const Color(0xFF082FBD),
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                   ),
                 );
               },
-            ),
-          );
+            );
         },
       ),
     );
@@ -1906,41 +2132,68 @@ class _DriverScreenState extends State<DriverScreen> {
     final license = _licenseController.text.trim();
     final vehicle = _vehicleController.text.trim();
 
-    // Validation
-    if (name.isEmpty) {
-      _showError("Please enter your full name");
-      return;
+    // Clear previous errors
+    setState(() {
+      _nameError = false;
+      _phoneError = false;
+      _emailError = false;
+      _passwordError = false;
+      _licenseError = false;
+      _vehicleError = false;
+      _todaError = false;
+    });
+
+    // Validation - set error flags for empty/invalid fields
+    bool hasError = false;
+    if (name.isEmpty || name.length < 2) {
+      setState(() {
+        _nameError = true;
+      });
+      hasError = true;
     }
-    if (name.length < 2) {
-      _showError("Please enter a valid name");
-      return;
+    if (phone.isEmpty) {
+      setState(() {
+        _phoneError = true;
+      });
+      hasError = true;
     }
     if (email.isEmpty) {
-      _showError("Please enter your email address");
-      return;
+      setState(() {
+        _emailError = true;
+      });
+      hasError = true;
+    } else if (!_isValidEmail(email)) {
+      setState(() {
+        _emailError = true;
+      });
+      hasError = true;
     }
-    if (!_isValidEmail(email)) {
-      _showError("Please enter a valid email address");
-      return;
-    }
-    if (password.isEmpty) {
-      _showError("Please enter a password");
-      return;
-    }
-    if (password.length < 6) {
-      _showError("Password must be at least 6 characters long");
-      return;
+    if (password.isEmpty || password.length < 6) {
+      setState(() {
+        _passwordError = true;
+      });
+      hasError = true;
     }
     if (license.isEmpty) {
-      _showError("Please enter your driver's license number");
-      return;
+      setState(() {
+        _licenseError = true;
+      });
+      hasError = true;
     }
     if (vehicle.isEmpty) {
-      _showError("Please enter your vehicle information");
-      return;
+      setState(() {
+        _vehicleError = true;
+      });
+      hasError = true;
     }
     if (_selectedToda == null || _selectedToda!.isEmpty) {
-      _showError("Please select a TODA");
+      setState(() {
+        _todaError = true;
+      });
+      hasError = true;
+    }
+    if (hasError) {
+      _showError("Please fill in all required fields correctly");
       return;
     }
 
@@ -1970,19 +2223,14 @@ class _DriverScreenState extends State<DriverScreen> {
         }
       } catch (_) {}
       
-      // Ensure we land on the dashboard immediately
+      // Registration successful, navigate to dashboard
       if (mounted) {
         setState(() {
           _isRegistering = false;
           _currentTabIndex = 0;
         });
-        _showMessage("Driver account created successfully! Welcome to TODA GO, $name!");
+        _showMessage("Registration successful! Welcome to TODA GO.");
         _clearForm();
-        // Hard navigate to DriverScreen to avoid being stuck in any sheet/context
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DriverScreen()),
-          (route) => false,
-        );
       }
     } catch (e) {
       _showError(_getFirebaseErrorMessage(e.toString()));
@@ -2004,23 +2252,36 @@ class _DriverScreenState extends State<DriverScreen> {
     }
 
     // Validation
+    bool hasError = false;
     if (email.isEmpty) {
-      _showError("Please enter your email address");
-      return;
-    }
-    if (!_isValidEmail(email)) {
+      if (mounted) {
+        setState(() {
+          _emailError = true;
+          _loginError = 'Please enter your email address';
+        });
+      }
+      hasError = true;
+    } else if (!_isValidEmail(email)) {
       if (mounted) {
         setState(() {
           _emailError = true;
           _loginError = 'Incorrect Email';
         });
       }
-      return;
+      hasError = true;
     }
     if (password.isEmpty) {
-      _showError("Please enter your password");
+      if (mounted) {
+        setState(() {
+          _passwordError = true;
+          if (!hasError) {
+            _loginError = 'Please enter your password';
+          }
+        });
+      }
       return;
     }
+    if (hasError) return;
 
     try {
       final error = await _driverAuthService.signIn(
@@ -2030,14 +2291,16 @@ class _DriverScreenState extends State<DriverScreen> {
       
       if (error != null) {
         final lower = error.toLowerCase();
-        if (lower.contains('wrong-password')) {
+        final passwordError =
+            lower.contains('wrong-password') || lower.contains('wrong password') || lower.contains('incorrect password');
+        if (passwordError) {
           if (mounted) {
             setState(() {
               _passwordError = true;
               _loginError = 'Incorrect Password';
             });
           }
-        } else if (lower.contains('invalid-email') || lower.contains('user-not-found')) {
+        } else if (lower.contains('invalid-email') || lower.contains('user-not-found') || lower.contains('incorrect email')) {
           if (mounted) {
             setState(() {
               _emailError = true;
@@ -2055,24 +2318,20 @@ class _DriverScreenState extends State<DriverScreen> {
           _isRegistering = false;
           _currentTabIndex = 0;
         });
-        _showMessage("Welcome back, driver!");
         _clearForm();
-        // Ensure we are on the Driver dashboard and clear any previous routes
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DriverScreen()),
-          (route) => false,
-        );
       }
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      if (msg.contains('wrong-password')) {
+      final passwordError =
+          msg.contains('wrong-password') || msg.contains('wrong password') || msg.contains('incorrect password');
+      if (passwordError) {
         if (mounted) {
           setState(() {
             _passwordError = true;
             _loginError = 'Incorrect Password';
           });
         }
-      } else if (msg.contains('invalid-email') || msg.contains('user-not-found')) {
+      } else if (msg.contains('invalid-email') || msg.contains('user-not-found') || msg.contains('incorrect email')) {
         if (mounted) {
           setState(() {
             _emailError = true;
@@ -2157,8 +2416,7 @@ class _DriverScreenState extends State<DriverScreen> {
     final status = data['status'] ?? 'waiting';
     final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
     final passengerId = data['passengerId'] ?? '';
-    final String paymentMethod = (data['paymentMethod'] ?? 'cash').toString();
-    final String paymentStatus = (data['paymentStatus'] ?? (paymentMethod == 'gcash' ? 'pending' : 'cash')).toString();
+    final String currentLocation = (data['destination'] ?? 'Not provided').toString();
 
     showModalBottomSheet(
       context: context,
@@ -2171,9 +2429,15 @@ class _DriverScreenState extends State<DriverScreen> {
               : Future.value(null),
           builder: (context, passengerSnapshot) {
             String passengerName = 'Unknown Passenger';
+            String? profileImageUrl;
+            String passengerEmail = '';
+            String passengerPhone = '';
             if (passengerSnapshot.hasData && passengerSnapshot.data!.exists) {
               final passengerData = passengerSnapshot.data!.data() as Map<String, dynamic>?;
               passengerName = passengerData?['name'] ?? 'Unknown Passenger';
+              profileImageUrl = passengerData?['profileImageUrl'] as String?;
+              passengerEmail = (passengerData?['email'] ?? '').toString();
+              passengerPhone = (passengerData?['phone'] ?? '').toString();
             }
 
             return Container(
@@ -2206,20 +2470,6 @@ class _DriverScreenState extends State<DriverScreen> {
                     padding: const EdgeInsets.all(24),
                     child: Row(
                       children: [
-                        Container(
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: _statusColor(status),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.person,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             'Passenger Request',
@@ -2246,7 +2496,59 @@ class _DriverScreenState extends State<DriverScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                          _buildInfoItem(Icons.person_outline, 'Passenger', passengerName),
+                          InkWell(
+                            onTap: () => _showPassengerProfile(passengerName, passengerEmail, passengerPhone, profileImageUrl),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 28,
+                                    backgroundColor: const Color(0xFF082FBD).withOpacity(0.1),
+                                    backgroundImage: profileImageUrl != null
+                                        ? (profileImageUrl.startsWith('data:image/')
+                                            ? MemoryImage(base64Decode(profileImageUrl.split(',')[1]))
+                                            : NetworkImage(profileImageUrl) as ImageProvider)
+                                        : null,
+                                    child: profileImageUrl == null
+                                        ? const Icon(Icons.person, color: Color(0xFF082FBD), size: 28)
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Passenger',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          passengerName,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right, color: Color(0xFF082FBD)),
+                                ],
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 20),
                           _buildInfoItem(null, 'TODA', toda, customIcon: Image.asset(
                             'assets/icons/TODA2.png',
@@ -2257,42 +2559,11 @@ class _DriverScreenState extends State<DriverScreen> {
                           const SizedBox(height: 20),
                           _buildInfoItem(Icons.people_outline, 'Passenger Count', '$passengerCount passenger${passengerCount > 1 ? 's' : ''}'),
                           const SizedBox(height: 20),
-                          _buildInfoItem(Icons.info_outline, 'Status', status.toUpperCase()),
-                          const SizedBox(height: 20),
-                          _buildInfoItem(Icons.payment, 'Payment',
-                            paymentMethod.toLowerCase() == 'gcash'
-                                ? 'GCash (${paymentStatus.toUpperCase()})'
-                                : 'Cash'),
+                          _buildInfoItem(Icons.location_on_outlined, 'Current Location', currentLocation),
                           if (timestamp != null) ...[
                             const SizedBox(height: 20),
                             _buildInfoItem(Icons.access_time, 'Requested', _formatTimestamp(timestamp)),
                           ],
-                          const SizedBox(height: 24),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                Navigator.of(context).pop();
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ChatScreen(
-                                      pickupId: pickupDoc.id,
-                                      senderType: 'driver',
-                                      title: 'Passenger Chat',
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF082FBD)),
-                              label: const Text('Open Chat'),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFF082FBD)),
-                                foregroundColor: const Color(0xFF082FBD),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
                           const SizedBox(height: 32),
                           if (status == 'waiting') ...[
                             SizedBox(
@@ -2302,7 +2573,13 @@ class _DriverScreenState extends State<DriverScreen> {
                                   Navigator.of(context).pop();
                                   _markOnTheWay(pickupDoc.id);
                                 },
-                                icon: const Icon(Icons.directions_car),
+                                icon: Image.asset(
+                                  'assets/icons/TODA2.png',
+                                  width: 24,
+                                  height: 24,
+                                  fit: BoxFit.contain,
+                                  color: Colors.white,
+                                ),
                                 label: const Text('Accept Ride'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.orange,
@@ -2313,16 +2590,52 @@ class _DriverScreenState extends State<DriverScreen> {
                             ),
                           ],
                           if (status == 'onTheWay') ...[
+                            SizedBox(
+                              width: double.infinity,
+                              child: StreamBuilder<int>(
+                                stream: UnreadMessageService().getUnreadCount(pickupDoc.id),
+                                builder: (context, snapshot) {
+                                  final unreadCount = snapshot.data ?? 0;
+                                  return ElevatedButton.icon(
+                                    onPressed: () async {
+                                      Navigator.of(context).pop();
+                                      await Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => ChatScreen(
+                                            pickupId: pickupDoc.id,
+                                            title: 'Chat with Passenger',
+                                            senderType: 'driver',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    icon: unreadCount > 0
+                                        ? Badge(
+                                            label: Text('$unreadCount'),
+                                            child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                                          )
+                                        : const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                                    label: const Text('Open Chat'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF082FBD),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
                             const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               child: OutlinedButton.icon(
                                 onPressed: () {
                                   Navigator.of(context).pop();
-                                  _markArrived(pickupDoc.id);
+                                  _completeRide(pickupDoc.id, passengerId, passengerName);
                                 },
-                                icon: const Icon(Icons.location_on_outlined, color: Color(0xFF082FBD)),
-                                label: const Text('Mark Arrived'),
+                                icon: const Icon(Icons.check_circle, color: Color(0xFF082FBD)),
+                                label: const Text('Complete Ride'),
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(color: Color(0xFF082FBD)),
                                   foregroundColor: const Color(0xFF082FBD),
@@ -2330,24 +2643,8 @@ class _DriverScreenState extends State<DriverScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pop();
-                                  _completeRide(pickupDoc.id, passengerId, passengerName);
-                                },
-                                icon: const Icon(Icons.check_circle),
-                                label: const Text('Complete Ride'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                ),
-                              ),
-                            ),
                           ],
+
                           const SizedBox(height: 24),
                           ],
                         ),
@@ -2360,6 +2657,138 @@ class _DriverScreenState extends State<DriverScreen> {
           },
         );
       },
+    );
+  }
+
+  /// Show passenger profile modal
+  void _showPassengerProfile(String name, String email, String phone, String? profileImageUrl) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.6,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                children: [
+                  const Icon(Icons.person, color: Color(0xFF082FBD), size: 30),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Passenger Profile',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF082FBD),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    color: Colors.grey.shade600,
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: const Color(0xFF082FBD).withOpacity(0.1),
+                      backgroundImage: profileImageUrl != null
+                          ? (profileImageUrl.startsWith('data:image/')
+                              ? MemoryImage(base64Decode(profileImageUrl.split(',')[1]))
+                              : NetworkImage(profileImageUrl) as ImageProvider)
+                          : null,
+                      child: profileImageUrl == null
+                          ? const Icon(Icons.person, color: Color(0xFF082FBD), size: 50)
+                          : null,
+                    ),
+                    const SizedBox(height: 24),
+                    _buildProfileItem(Icons.person_outline, 'Name', name),
+                    if (email.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _buildProfileItem(Icons.email_outlined, 'Email', email),
+                    ],
+                    if (phone.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _buildProfileItem(Icons.phone_outlined, 'Phone', phone),
+                    ],
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build profile item for passenger profile modal
+  Widget _buildProfileItem(IconData icon, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.grey.shade600, size: 24),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2399,33 +2828,6 @@ class _DriverScreenState extends State<DriverScreen> {
     );
   }
 
-  Future<void> _markOnTheWay(String pickupId) async {
-    final user = _driverAuthService.currentUser;
-    if (user == null) return;
-
-    await FirebaseFirestore.instance.collection('pickups').doc(pickupId).update({
-      'status': 'onTheWay',
-      'driverId': user.uid,
-    });
-
-    _showMessage("Marked as On The Way!");
-
-    // Notify passenger that driver is on the way
-    try {
-      await NotificationService().enqueuePassengerNotificationForPickup(
-        pickupId: pickupId,
-        title: 'Driver is on the way',
-        body: 'Your driver is heading to your location.',
-        data: {
-          'type': 'on_the_way',
-          'pickupId': pickupId,
-        },
-      );
-      // Optional: subscribe driver to pickup topic for per-ride updates
-      await NotificationService().subscribeToPickupTopic(pickupId);
-    } catch (_) {}
-  }
-
   Future<void> _completeRide(String pickupId, String passengerId, String passengerName) async {
     try {
       // Update pickup status to completed
@@ -2447,20 +2849,6 @@ class _DriverScreenState extends State<DriverScreen> {
           },
         );
       } catch (_) {}
-
-      // Show rating dialog for the passenger
-      if (mounted) {
-        await showRatingDialog(
-          context: context,
-          pickupId: pickupId,
-          ratingType: 'passenger_rating',
-          ratedUserId: passengerId.isNotEmpty ? passengerId : null,
-          ratedUserName: passengerName.isNotEmpty ? passengerName : null,
-          onRatingSubmitted: () {
-            // Optional: Add any post-rating logic here
-          },
-        );
-      }
     } catch (e) {
       _showError("Failed to complete ride: $e");
     }
@@ -2501,8 +2889,6 @@ class _DriverScreenState extends State<DriverScreen> {
         return Colors.red;
       case 'onTheWay':
         return Colors.orange;
-      case 'arrived':
-        return Colors.blue;
       case 'completed':
         return Colors.green;
       case 'cancelled':
@@ -2514,7 +2900,7 @@ class _DriverScreenState extends State<DriverScreen> {
 
   /// Validation and utility methods
   bool _isValidEmail(String email) {
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+    return RegExp(r'^\S+@\S+\.\S+$').hasMatch(email);
   }
 
   void _clearForm() {

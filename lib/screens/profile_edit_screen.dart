@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'dart:io';
-import 'dart:convert';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -13,7 +9,7 @@ class ProfileEditScreen extends StatefulWidget {
   State<ProfileEditScreen> createState() => _ProfileEditScreenState();
 }
 
-class _ProfileEditScreenState extends State<ProfileEditScreen> {
+class _ProfileEditScreenState extends State<ProfileEditScreen> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -23,16 +19,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _isDriver = false;
-  
-  // Profile picture variables
-  final ImagePicker _imagePicker = ImagePicker();
-  XFile? _selectedImage;
-  String? _currentProfilePictureUrl;
-  bool _uploadingImage = false;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    );
     _loadProfile();
   }
 
@@ -50,8 +50,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _phoneController.text = (data['phone'] as String?) ?? '';
     _licenseController.text = (data['licenseNumber'] as String?) ?? '';
     _vehicleController.text = (data['vehicleInfo'] as String?) ?? '';
-    _currentProfilePictureUrl = (data['profilePictureUrl'] as String?);
-    if (mounted) setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+      _animationController.forward();
+    }
   }
 
   Future<void> _save() async {
@@ -60,18 +62,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     if (user == null) return;
     setState(() => _saving = true);
     try {
-      // Upload profile picture if selected
-      String? profilePictureUrl = await _uploadProfilePicture();
-      
       final Map<String, dynamic> payload = {
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
       };
-      
-      // Add profile picture URL if available
-      if (profilePictureUrl != null) {
-        payload['profilePictureUrl'] = profilePictureUrl;
-      }
       
       if (_isDriver) {
         payload['licenseNumber'] = _licenseController.text.trim();
@@ -96,140 +90,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
-  Future<void> _pickImage() async {
-    try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 70,
-      );
-      if (image != null) {
-        setState(() {
-          _selectedImage = image;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick image: $e')),
-        );
-      }
-    }
-  }
 
-  Future<String?> _uploadProfilePicture() async {
-    if (_selectedImage == null) return _currentProfilePictureUrl;
-    
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User not authenticated')),
-        );
-      }
-      return null;
-    }
-
-    setState(() => _uploadingImage = true);
-    
-    try {
-      print('Starting profile picture upload for user: ${user.uid}');
-      
-      // Try Firebase Storage first
-      try {
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('profile_pictures/${user.uid}.jpg');
-        
-        print('Storage reference created: ${storageRef.fullPath}');
-        
-        final metadata = SettableMetadata(
-          contentType: 'image/jpeg',
-          customMetadata: {
-            'userId': user.uid,
-            'uploadedAt': DateTime.now().toIso8601String(),
-          },
-        );
-        
-        final uploadTask = storageRef.putFile(File(_selectedImage!.path), metadata);
-        final snapshot = await uploadTask;
-        final downloadUrl = await snapshot.ref.getDownloadURL();
-        
-        print('Firebase Storage upload successful. Download URL: $downloadUrl');
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Profile picture updated successfully!')),
-          );
-        }
-        
-        return downloadUrl;
-      } catch (storageError) {
-        print('Firebase Storage failed, trying Firestore fallback: $storageError');
-        
-        // Fallback: Store as base64 in Firestore (for development)
-        final imageFile = File(_selectedImage!.path);
-        final imageBytes = await imageFile.readAsBytes();
-        final base64String = base64Encode(imageBytes);
-        
-        // Store base64 string with data URI prefix
-        final dataUri = 'data:image/jpeg;base64,$base64String';
-        
-        print('Using Firestore fallback for profile picture storage');
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Profile picture updated (using fallback storage)!')),
-          );
-        }
-        
-        return dataUri;
-      }
-    } catch (e) {
-      print('General upload error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload image: $e')),
-        );
-      }
-      return null;
-    } finally {
-      if (mounted) setState(() => _uploadingImage = false);
-    }
-  }
-
-  ImageProvider? _getProfileImage() {
-    // Priority 1: Show selected image (preview)
-    if (_selectedImage != null) {
-      return FileImage(File(_selectedImage!.path));
-    }
-    
-    // Priority 2: Show existing profile picture
-    if (_currentProfilePictureUrl != null) {
-      // Check if it's a base64 data URI
-      if (_currentProfilePictureUrl!.startsWith('data:image/')) {
-        try {
-          // Extract base64 data from data URI
-          final base64Data = _currentProfilePictureUrl!.split(',')[1];
-          final bytes = base64Decode(base64Data);
-          return MemoryImage(bytes);
-        } catch (e) {
-          print('Error decoding base64 image: $e');
-          return null;
-        }
-      } else {
-        // Regular network image URL
-        return NetworkImage(_currentProfilePictureUrl!);
-      }
-    }
-    
-    // Priority 3: No image available
-    return null;
-  }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
     _licenseController.dispose();
@@ -269,68 +134,33 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Card(
+                child: FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: Column(
+                    children: [
+                      Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: [
-                            GestureDetector(
-                              onTap: _pickImage,
-                              child: Stack(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 32,
-                                    backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
-                                    backgroundImage: _getProfileImage(),
-                                    child: (_selectedImage == null && _currentProfilePictureUrl == null)
-                                        ? Icon(
-                                            _isDriver ? Icons.directions_car_filled : Icons.person_outline,
-                                            size: 32,
-                                            color: const Color(0xFF082FBD),
-                                          )
-                                        : null,
-                                  ),
-                                  if (_uploadingImage)
-                                    Positioned.fill(
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withOpacity(0.5),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Center(
-                                          child: SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                            CircleAvatar(
+                              radius: 32,
+                              backgroundColor: const Color(0xFF082FBD).withOpacity(0.12),
+                              child: _isDriver
+                                  ? Image.asset(
+                                      'assets/icons/TODA2.png',
+                                      width: 32,
+                                      height: 32,
+                                      fit: BoxFit.contain,
+                                      color: const Color(0xFF082FBD),
+                                    )
+                                  : const Icon(
+                                      Icons.person_outline,
+                                      size: 32,
+                                      color: Color(0xFF082FBD),
                                     ),
-                                  Positioned(
-                                    bottom: 0,
-                                    right: 0,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF082FBD),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.camera_alt,
-                                        size: 16,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
@@ -359,11 +189,21 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Icon(
-                                            _isDriver ? Icons.local_taxi : Icons.person,
-                                            size: 16,
-                                            color: _isDriver ? Colors.green : Colors.blue,
-                                          ),
+                                          _isDriver
+                                              ? SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: Image.asset(
+                                                    'assets/icons/TODA2.png',
+                                                    fit: BoxFit.contain,
+                                                    color: Colors.green,
+                                                  ),
+                                                )
+                                              : Icon(
+                                                  Icons.person,
+                                                  size: 16,
+                                                  color: Colors.blue,
+                                                ),
                                           const SizedBox(width: 6),
                                           Text(
                                             _isDriver ? 'Driver' : 'Passenger',
@@ -397,9 +237,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                               TextFormField(
                                 controller: _nameController,
                                 textCapitalization: TextCapitalization.words,
+                                textInputAction: TextInputAction.next,
                                 decoration: const InputDecoration(
                                   labelText: 'Full Name',
                                   prefixIcon: Icon(Icons.person_outline),
+                                  border: OutlineInputBorder(),
                                 ),
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) return 'Name is required';
@@ -410,9 +252,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                               TextFormField(
                                 controller: _phoneController,
                                 keyboardType: TextInputType.phone,
+                                textInputAction: TextInputAction.next,
                                 decoration: const InputDecoration(
                                   labelText: 'Phone',
                                   prefixIcon: Icon(Icons.phone_outlined),
+                                  border: OutlineInputBorder(),
                                 ),
                               ),
                               if (_isDriver)
@@ -436,40 +280,65 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                     TextFormField(
                                       controller: _licenseController,
                                       textCapitalization: TextCapitalization.characters,
+                                      textInputAction: TextInputAction.next,
                                       decoration: const InputDecoration(
                                         labelText: "Driver's License Number",
                                         prefixIcon: Icon(Icons.badge_outlined),
+                                        border: OutlineInputBorder(),
                                       ),
                                     ),
                                     const SizedBox(height: 16),
                                     TextFormField(
                                       controller: _vehicleController,
                                       textCapitalization: TextCapitalization.sentences,
-                                      decoration: const InputDecoration(
+                                      textInputAction: TextInputAction.done,
+                                      decoration: InputDecoration(
                                         labelText: 'Vehicle Information',
-                                        prefixIcon: Icon(Icons.directions_car_outlined),
+                                        prefixIcon: Padding(
+                                          padding: const EdgeInsets.all(12.0),
+                                          child: Image.asset(
+                                            'assets/icons/TODA2.png',
+                                            width: 24,
+                                            height: 24,
+                                            fit: BoxFit.contain,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        border: const OutlineInputBorder(),
                                       ),
                                     ),
                                   ],
                                 ),
                               const SizedBox(height: 24),
-                              SizedBox(
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
                                   onPressed: _saving ? null : _save,
-                                  icon: _saving
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                        )
-                                      : const Icon(Icons.save_outlined),
-                                  label: Text(_saving ? 'Saving...' : 'Save Changes'),
+                                  icon: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: _saving
+                                        ? const SizedBox(
+                                            key: ValueKey('loading'),
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                          )
+                                        : const Icon(Icons.save_outlined, key: ValueKey('icon')),
+                                  ),
+                                  label: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Text(
+                                      _saving ? 'Saving...' : 'Save Changes',
+                                      key: ValueKey(_saving),
+                                    ),
+                                  ),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF082FBD),
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 14),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    elevation: _saving ? 0 : 2,
                                   ),
                                 ),
                               ),
@@ -477,8 +346,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -219,86 +219,24 @@ class TodaGoApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, authSnap) {
-        // If unauthenticated, use system light theme by default
-        if (authSnap.data == null) {
-          return MaterialApp(
-            title: 'TODA GO',
-            debugShowCheckedModeBanner: false,
-            theme: _lightTheme(),
-            darkTheme: _darkTheme(),
-            themeMode: ThemeMode.light,
-            locale: const Locale('en'),
-            supportedLocales: const [Locale('en')],
-            localizationsDelegates: [
-              AppLocalizations.delegate,
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            home: const AuthWrapper(),
-            routes: {
-              PassengerScreen.routeName: (_) => const PassengerScreen(),
-              DriverScreen.routeName: (_) => const DriverScreen(),
-            },
-          );
-        }
-
-        final user = authSnap.data!;
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .snapshots(),
-          builder: (context, userSnap) {
-            if (userSnap.hasError) {
-              // Ignore user settings errors (e.g., permission-denied) and proceed with defaults
-              return MaterialApp(
-                title: 'TODA GO',
-                debugShowCheckedModeBanner: false,
-                theme: _lightTheme(),
-                darkTheme: _darkTheme(),
-                themeMode: ThemeMode.light,
-                locale: const Locale('en'),
-                supportedLocales: const [Locale('en')],
-                localizationsDelegates: [
-                  AppLocalizations.delegate,
-                  GlobalMaterialLocalizations.delegate,
-                  GlobalWidgetsLocalizations.delegate,
-                  GlobalCupertinoLocalizations.delegate,
-                ],
-                home: const AuthWrapper(),
-                routes: {
-                  PassengerScreen.routeName: (_) => const PassengerScreen(),
-                  DriverScreen.routeName: (_) => const DriverScreen(),
-                },
-              );
-            }
-            // Dark mode disabled: ignore any stored preference and force light theme
-            return MaterialApp(
-              title: 'TODA GO',
-              debugShowCheckedModeBanner: false,
-              theme: _lightTheme(),
-              darkTheme: _darkTheme(),
-              themeMode: ThemeMode.light,
-              locale: const Locale('en'),
-              supportedLocales: const [Locale('en')],
-              localizationsDelegates: [
-                AppLocalizations.delegate,
-                GlobalMaterialLocalizations.delegate,
-                GlobalWidgetsLocalizations.delegate,
-                GlobalCupertinoLocalizations.delegate,
-              ],
-              home: const AuthWrapper(),
-              routes: {
-                PassengerScreen.routeName: (_) => const PassengerScreen(),
-                DriverScreen.routeName: (_) => const DriverScreen(),
-              },
-            );
-          },
-        );
+    return MaterialApp(
+      title: 'TODA GO',
+      debugShowCheckedModeBanner: false,
+      theme: _lightTheme(),
+      darkTheme: _darkTheme(),
+      themeMode: ThemeMode.light,
+      locale: const Locale('en'),
+      supportedLocales: const [Locale('en')],
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: const AuthWrapper(),
+      routes: {
+        PassengerScreen.routeName: (_) => const PassengerScreen(),
+        DriverScreen.routeName: (_) => const DriverScreen(),
       },
     );
   }

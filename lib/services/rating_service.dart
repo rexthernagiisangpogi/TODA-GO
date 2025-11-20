@@ -43,10 +43,20 @@ class RatingService {
         }
       }
 
+      // Fetch rater name for history display
+      String? raterName;
+      try {
+        final raterDoc = await _firestore.collection('users').doc(user.uid).get();
+        if (raterDoc.exists) {
+          raterName = raterDoc.data()?['name']?.toString();
+        }
+      } catch (_) {}
+
       // Create new rating
       final ratingData = {
         'pickupId': pickupId,
         'raterId': user.uid,
+        'raterName': raterName ?? user.displayName ?? '',
         'ratedUserId': ratedUserId,
         'rating': rating,
         'comment': comment ?? '',

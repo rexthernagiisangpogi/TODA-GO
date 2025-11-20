@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PassengerAuthService {
   static final PassengerAuthService _instance = PassengerAuthService._internal();
@@ -142,6 +143,12 @@ class PassengerAuthService {
         'userType': 'passenger',
         'role': 'regularPassenger',
       };
+      
+      // Mark that tutorial should be shown for new user
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('show_tutorial_passenger', true);
+      } catch (_) {}
       
       print('=== PASSENGER REGISTRATION COMPLETE ===');
       return null;

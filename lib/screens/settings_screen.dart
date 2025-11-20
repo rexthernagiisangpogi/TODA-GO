@@ -9,6 +9,7 @@ import 'change_email_screen.dart';
 import 'change_password_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_of_service_screen.dart';
+import 'how_to_use_screen.dart';
 import '../l10n/app_localizations.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -23,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _pushNotifications = true;
   bool _vibrationAlerts = true;
   bool _locationServices = true;
+  String _userType = 'passenger';
 
   // Styled circular icon badge for consistent leading/secondary visuals
   Widget _iconBadge(IconData icon) {
@@ -51,6 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _pushNotifications = (settings['pushNotifications'] as bool?) ?? _pushNotifications;
       _vibrationAlerts = (settings['vibrationAlerts'] as bool?) ?? _vibrationAlerts;
       _locationServices = (settings['locationServices'] as bool?) ?? _locationServices;
+      _userType = (data?['userType'] as String?) ?? 'passenger';
     });
   }
 
@@ -113,6 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
           // Language selection moved to About section
+
                 const Divider(height: 1),
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -273,6 +277,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             clipBehavior: Clip.antiAlias,
             child: Column(
               children: [
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  leading: _iconBadge(Icons.help_outline),
+                  title: const Text('How to use TODA GO'),
+                  subtitle: const Text('Learn how to use all features'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => HowToUseScreen(userType: _userType),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   leading: _iconBadge(Icons.info_outline),

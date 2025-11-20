@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DriverAuthService {
   static final DriverAuthService _instance = DriverAuthService._internal();
@@ -23,12 +24,22 @@ class DriverAuthService {
     
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
-      if (!userDoc.exists) return false;
+      if (!userDoc.exists) {
+        print('Driver validation: User document does not exist');
+        return false;
+      }
       
       final userData = userDoc.data()!;
-      return userData['userType'] == 'driver';
+      final isDriver = userData['userType'] == 'driver';
+      print('Driver validation: userType=${userData['userType']}, isDriver=$isDriver');
+      return isDriver;
     } catch (e) {
-      // Do not sign out here; just report invalid
+      print('Driver validation error: $e');
+      // If we have cached driver data, trust it
+      if (_currentDriverData != null) {
+        print('Driver validation: Using cached data');
+        return true;
+      }
       return false;
     }
   }
@@ -121,6 +132,12 @@ class DriverAuthService {
         'vehicleInfo': vehicleInfo,
         'toda': toda,
       };
+      
+      // Mark that tutorial should be shown for new user
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('show_tutorial_driver', true);
+      } catch (_) {}
       
       print('Driver registration completed successfully');
       return null; // Success

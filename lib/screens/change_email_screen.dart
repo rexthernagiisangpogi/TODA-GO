@@ -11,12 +11,14 @@ class ChangeEmailScreen extends StatefulWidget {
 
 class _ChangeEmailScreenState extends State<ChangeEmailScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _currentEmailController = TextEditingController();
   final _newEmailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _saving = false;
 
   @override
   void dispose() {
+    _currentEmailController.dispose();
     _newEmailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -27,6 +29,14 @@ class _ChangeEmailScreenState extends State<ChangeEmailScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) return;
 
+    // Verify current email matches
+    if (_currentEmailController.text.trim() != user.email) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Current email does not match your account')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       final cred = EmailAuthProvider.credential(
@@ -36,20 +46,46 @@ class _ChangeEmailScreenState extends State<ChangeEmailScreen> {
       await user.reauthenticateWithCredential(cred);
       final newEmail = _newEmailController.text.trim();
 
-      await user.verifyBeforeUpdateEmail(newEmail);
-      // Also update user doc email for consistency
+      // Update Firebase Auth email immediately
+      await user.updateEmail(newEmail);
+      await user.reload();
+      
+      // Update Firestore email
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .set({'email': newEmail}, SetOptions(merge: true));
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Email change requested. Check your new inbox to confirm.'),
+      
+      final shouldLogout = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Email Updated Successfully'),
+          content: Text('Your email has been changed to $newEmail. You can now login with your new email.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Stay Logged In'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF082FBD),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Logout'),
+            ),
+          ],
         ),
       );
-      Navigator.of(context).pop(true);
+
+      if (shouldLogout == true) {
+        await FirebaseAuth.instance.signOut();
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,6 +115,20 @@ class _ChangeEmailScreenState extends State<ChangeEmailScreen> {
           key: _formKey,
           child: Column(
             children: [
+              TextFormField(
+                controller: _currentEmailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Current Email',
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Email is required';
+                  if (!v.contains('@')) return 'Enter a valid email';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _newEmailController,
                 keyboardType: TextInputType.emailAddress,

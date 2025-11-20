@@ -51,29 +51,59 @@ class TutorialHelper {
     );
   }
 
-  /// Wrap a screen with onboarding check
+  /// Check if tutorial should be shown after registration
+  static Future<bool> shouldShowTutorialAfterRegistration(String userType) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'show_tutorial_$userType';
+      return prefs.getBool(key) ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Clear the post-registration tutorial flag
+  static Future<void> clearTutorialFlag(String userType) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('show_tutorial_$userType');
+      await markOnboardingCompleted(userType);
+    } catch (e) {
+      // Silently fail
+    }
+  }
+
+  /// Wrap a screen with post-registration tutorial check
   static Widget wrapWithOnboarding({
     required Widget child,
     required String userType,
   }) {
     return FutureBuilder<bool>(
-      future: shouldShowOnboarding(userType),
+      future: shouldShowTutorialAfterRegistration(userType),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return child; // Show main screen immediately while checking
         }
 
         final shouldShow = snapshot.data ?? false;
         if (shouldShow) {
-          return OnboardingScreen(
-            userType: userType,
-            onComplete: () async {
-              await markOnboardingCompleted(userType);
-              // The widget will rebuild and show the child
-            },
-          );
+          // Show tutorial after a short delay for smooth transition
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await Future.delayed(const Duration(milliseconds: 300));
+            if (context.mounted) {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OnboardingScreen(
+                    userType: userType,
+                    onComplete: () async {
+                      await clearTutorialFlag(userType);
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ),
+              );
+            }
+          });
         }
 
         return child;
