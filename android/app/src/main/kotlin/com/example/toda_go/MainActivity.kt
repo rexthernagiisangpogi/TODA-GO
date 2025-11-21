@@ -1,4 +1,4 @@
-package com.example.toda_go
+package com.toda_go.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
