@@ -14,6 +14,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _saving = false;
+  bool _showCurrentPassword = false;
+  bool _showNewPassword = false;
+  bool _showConfirmPassword = false;
 
   @override
   void dispose() {
@@ -98,10 +101,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             children: [
               TextFormField(
                 controller: _currentPasswordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: !_showCurrentPassword,
+                decoration: InputDecoration(
                   labelText: 'Current Password',
-                  prefixIcon: Icon(Icons.lock_outline),
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showCurrentPassword ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _showCurrentPassword = !_showCurrentPassword),
+                  ),
                 ),
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Current password is required';
@@ -111,10 +118,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _newPasswordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: !_showNewPassword,
+                decoration: InputDecoration(
                   labelText: 'New Password',
-                  prefixIcon: Icon(Icons.lock_reset_outlined),
+                  prefixIcon: const Icon(Icons.lock_reset_outlined),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showNewPassword ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _showNewPassword = !_showNewPassword),
+                  ),
                 ),
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'New password is required';
@@ -125,10 +136,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _confirmPasswordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: !_showConfirmPassword,
+                decoration: InputDecoration(
                   labelText: 'Confirm Password',
-                  prefixIcon: Icon(Icons.check_circle_outline),
+                  prefixIcon: const Icon(Icons.check_circle_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showConfirmPassword ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _showConfirmPassword = !_showConfirmPassword),
+                  ),
                 ),
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Confirm your password';

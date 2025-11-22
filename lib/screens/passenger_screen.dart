@@ -56,6 +56,10 @@ class _PassengerScreenState extends State<PassengerScreen> {
   String? _driverIdForRating;
   String? _completedPickupId; // Store pickupId for rating
   StreamSubscription<DocumentSnapshot>? _activePickupSubscription;
+  StreamSubscription<QuerySnapshot>? _onTheWaySubscription;
+  StreamSubscription<QuerySnapshot>? _completedRidesSubscription;
+  StreamSubscription<User?>? _authSubscription;
+  bool _isLoggingOut = false;
   Set<String> _ratedPickupIds = {}; // Track which pickups have been rated to avoid duplicate dialogs
 
   // Bottom navigation: 0 = Map, 1 = Request, 2 = History, 3 = Profile
@@ -74,11 +78,6 @@ class _PassengerScreenState extends State<PassengerScreen> {
     'NATODA',
     'CARNATODA',
     'ALTODA',
-    'LAPNATODA',
-    'Culaba',
-    'Cabucgayan',
-    'Maripipi',
-    'Biliran',
   ];
 
   @override
@@ -87,8 +86,37 @@ class _PassengerScreenState extends State<PassengerScreen> {
     _getCurrentLocation();
     // Initialize FCM for passenger
     NotificationService().initialize(context: context);
-    // Listen for active pickup changes
     _listenToActivePickup();
+    _listenToAuthState();
+  }
+
+  void _listenToAuthState() {
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user == null) {
+        _onTheWaySubscription?.cancel();
+        _onTheWaySubscription = null;
+        _completedRidesSubscription?.cancel();
+        _completedRidesSubscription = null;
+        _activePickupSubscription?.cancel();
+        _activePickupSubscription = null;
+        if (mounted) {
+          setState(() {
+            _isLoggingOut = true;
+          });
+        }
+      }
+    });
+  }
+
+  void _cancelAllListeners() {
+    _authSubscription?.cancel();
+    _authSubscription = null;
+    _activePickupSubscription?.cancel();
+    _activePickupSubscription = null;
+    _onTheWaySubscription?.cancel();
+    _onTheWaySubscription = null;
+    _completedRidesSubscription?.cancel();
+    _completedRidesSubscription = null;
   }
 
   void _listenToActivePickup() {
@@ -96,13 +124,14 @@ class _PassengerScreenState extends State<PassengerScreen> {
     if (user == null) return;
 
     // Listen for any active pickups for this passenger that are on the way
-    FirebaseFirestore.instance
+    _onTheWaySubscription = FirebaseFirestore.instance
         .collection('pickups')
         .where('passengerId', isEqualTo: user.uid)
         .where('status', isEqualTo: 'onTheWay')
         .limit(1)
         .snapshots()
         .listen((snapshot) {
+      if (_isLoggingOut) return;
       if (snapshot.docs.isNotEmpty) {
         final pickupDoc = snapshot.docs.first;
         final pickupData = pickupDoc.data();
@@ -154,14 +183,14 @@ class _PassengerScreenState extends State<PassengerScreen> {
     });
     
     // Also listen for completed rides to show rating immediately
-    FirebaseFirestore.instance
+    _completedRidesSubscription = FirebaseFirestore.instance
         .collection('pickups')
         .where('passengerId', isEqualTo: user.uid)
         .where('status', isEqualTo: 'completed')
-        .orderBy('timestamp', descending: true)
         .limit(1)
         .snapshots()
         .listen((snapshot) async {
+      if (_isLoggingOut) return;
       if (snapshot.docs.isNotEmpty) {
         final pickupDoc = snapshot.docs.first;
         final pickupId = pickupDoc.id;
@@ -228,6 +257,7 @@ class _PassengerScreenState extends State<PassengerScreen> {
         .doc(pickupId)
         .snapshots()
         .listen((snapshot) async {
+      if (_isLoggingOut) return;
       if (!snapshot.exists) return;
       
       final currentPickupId = snapshot.id; // Use snapshot.id, not function parameter
@@ -314,13 +344,13 @@ class _PassengerScreenState extends State<PassengerScreen> {
 
   @override
   void dispose() {
+    _cancelAllListeners();
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _phoneController.dispose();
     _passengerCountController.dispose();
     _destinationController.dispose();
-    _activePickupSubscription?.cancel();
     super.dispose();
   }
 
@@ -856,9 +886,7 @@ class _PassengerScreenState extends State<PassengerScreen> {
     }
   }
 
-  Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
-  }
+
 
   void _showDriverProfile(String driverId) async {
     final driverDoc = await FirebaseFirestore.instance.collection('users').doc(driverId).get();
@@ -1126,42 +1154,7 @@ class _PassengerScreenState extends State<PassengerScreen> {
     );
   }
 
-  void _showLogoutDialog() async {
-    final shouldLogout = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.logout, color: Colors.red),
-            SizedBox(width: 12),
-            Text('Logout'),
-          ],
-        ),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
 
-    if (shouldLogout == true) {
-      await _logout();
-    }
-  }
 
   Widget _buildMainContent() {
     return Scaffold(
@@ -1645,16 +1638,6 @@ class _PassengerScreenState extends State<PassengerScreen> {
         return Colors.green;
       case 'ALTODA':
         return Colors.orange;
-      case 'LAPNATODA':
-        return Colors.purple;
-      case 'Culaba':
-        return Colors.red;
-      case 'Cabucgayan':
-        return Colors.teal;
-      case 'Maripipi':
-        return Colors.indigo;
-      case 'Biliran':
-        return Colors.brown;
       default:
         return Colors.grey;
     }
@@ -1889,11 +1872,14 @@ class _PassengerScreenState extends State<PassengerScreen> {
           child: Column(
             children: [
               StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance
+                stream: _isLoggingOut ? const Stream.empty() : FirebaseFirestore.instance
                     .collection('users')
                     .doc(user.uid)
                     .snapshots(),
                 builder: (context, snapshot) {
+                  if (_isLoggingOut || snapshot.hasError) {
+                    return const SizedBox.shrink();
+                  }
                   if (!snapshot.hasData) {
                     return const SizedBox.shrink();
                   }
@@ -2034,7 +2020,6 @@ class _PassengerScreenState extends State<PassengerScreen> {
               ),
 
               const SizedBox(height: 24),
-
               // Logout button inside Profile
               SizedBox(
                 width: double.infinity,
@@ -2114,14 +2099,18 @@ class _PassengerScreenState extends State<PassengerScreen> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
+          stream: _isLoggingOut ? const Stream.empty() : FirebaseFirestore.instance
               .collection('pickups')
               .where('passengerId', isEqualTo: user.uid)
               .limit(50)
               .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              final err = snapshot.error?.toString() ?? 'Unknown error';
+              // Ignore permission errors during logout
+              final err = snapshot.error?.toString() ?? '';
+              if (err.contains('permission-denied') || err.contains('PERMISSION_DENIED')) {
+                return const Center(child: CircularProgressIndicator());
+              }
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -2954,6 +2943,48 @@ class _PassengerScreenState extends State<PassengerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
+  }
+
+  /// Show logout confirmation dialog
+  void _showLogoutDialog() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Logout'),
+          ],
+        ),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout == true && mounted) {
+      setState(() {
+        _isLoggingOut = true;
+      });
+      _cancelAllListeners();
+      await FirebaseAuth.instance.signOut();
+    }
   }
 }
 

@@ -23,14 +23,14 @@ service cloud.firestore {
     match /pickups/{pickupId} {
       // READ - Allow drivers to read pickups for their TODA and passengers to read their own
       allow read: if request.auth != null && (
+        // Passengers can read their own pickups (check first to avoid me() call)
+        resource.data.passengerId == request.auth.uid
+        ||
         // Drivers can read pickups for their TODA (any status for map display)
         (
           me().data.userType == 'driver' &&
           resource.data.toda == me().data.toda
         )
-        ||
-        // Passengers can read their own pickups
-        (resource.data.passengerId == request.auth.uid)
         ||
         // Allow drivers to read pickups assigned to them
         (

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class PassengerRatingsScreen extends StatefulWidget {
@@ -53,18 +54,34 @@ class _PassengerRatingsScreenState extends State<PassengerRatingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ratingsStream = _ratingsStream;
-    if (ratingsStream == null) {
-      return const Center(
-        child: Text(
-          'Sign in to see your driver ratings.',
-          style: TextStyle(fontSize: 16),
-        ),
-      );
-    }
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, authSnapshot) {
+        if (authSnapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: ratingsStream,
+        if (authSnapshot.data == null) {
+          return const Center(
+            child: Text(
+              'Sign in to see your driver ratings.',
+              style: TextStyle(fontSize: 16),
+            ),
+          );
+        }
+
+        final ratingsStream = _ratingsStream;
+        if (ratingsStream == null) {
+          return const Center(
+            child: Text(
+              'Sign in to see your driver ratings.',
+              style: TextStyle(fontSize: 16),
+            ),
+          );
+        }
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: ratingsStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -73,11 +90,23 @@ class _PassengerRatingsScreenState extends State<PassengerRatingsScreen> {
         }
 
         if (snapshot.hasError) {
+          debugPrint('Ratings error: ${snapshot.error}');
           return Center(
-            child: Text(
-              'Unable to load your ratings right now.',
-              style: TextStyle(color: Colors.grey.shade600),
-              textAlign: TextAlign.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Unable to load your ratings right now.',
+                  style: TextStyle(color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Please check your connection and try again.',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           );
         }
@@ -210,6 +239,8 @@ class _PassengerRatingsScreenState extends State<PassengerRatingsScreen> {
               ),
             );
           },
+        );
+      },
         );
       },
     );

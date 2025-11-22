@@ -11,7 +11,6 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:firebase_storage/firebase_storage.dart';
 import '../services/driver_auth_service.dart';
 import '../services/vibration_service.dart';
-import '../widgets/auth_wrapper.dart';
 import 'settings_screen.dart';
 import '../widgets/chat_screen.dart';
 import '../services/notification_service.dart';
@@ -67,11 +66,7 @@ class _DriverScreenState extends State<DriverScreen> {
     'NATODA',
     'CARNATODA',
     'ALTODA',
-    'LAPNATODA',
-    'Culaba',
-    'Cabucgayan',
-    'Maripipi',
-    'Biliran',
+    
   ];
 
   // TODA type selection (nullable; require explicit selection)
@@ -99,25 +94,56 @@ class _DriverScreenState extends State<DriverScreen> {
     const LatLng(11.66, 124.50), // Northeast corner (expanded further east only)
   );
 
+  StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<QuerySnapshot>? _pickupSubscription;
+  StreamSubscription<DocumentSnapshot>? _userSettingsSubscription;
+  StreamSubscription<DocumentSnapshot>? _todaSubscription;
+
   @override
   void initState() {
     super.initState();
     _listenToPickupUpdates();
-    // Listen to user settings and TODA updates
     _listenToUserSettings();
     _listenToDriverToda();
-    // Initialize FCM for driver
     NotificationService().initialize(context: context);
-    // Force dashboard when authenticated
-    FirebaseAuth.instance.authStateChanges().listen((user) {
+    _listenToAuthState();
+  }
+
+  void _listenToAuthState() {
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (!mounted) return;
       if (user != null) {
         setState(() {
           _isRegistering = false;
           _currentTabIndex = 0;
         });
+      } else {
+        _cancelAllListeners();
       }
     });
+  }
+
+  Future<void> _cancelAllListeners() async {
+    await _authSubscription?.cancel();
+    _authSubscription = null;
+    await _pickupSubscription?.cancel();
+    _pickupSubscription = null;
+    await _userSettingsSubscription?.cancel();
+    _userSettingsSubscription = null;
+    await _todaSubscription?.cancel();
+    _todaSubscription = null;
+  }
+
+  @override
+  void dispose() {
+    _cancelAllListeners();
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _phoneController.dispose();
+    _licenseController.dispose();
+    _vehicleController.dispose();
+    super.dispose();
   }
 
   Future<void> _markOnTheWay(String pickupId) async {
@@ -835,7 +861,7 @@ class _DriverScreenState extends State<DriverScreen> {
     
     return Scaffold(
       appBar: AppBar(
-        leading: null,
+        automaticallyImplyLeading: false,
         title: Text(
           _currentTabIndex == 3
               ? l.t('driver_profile')
@@ -916,8 +942,7 @@ class _DriverScreenState extends State<DriverScreen> {
   }
 
   void _listenToPickupUpdates() {
-    // Listen for new pickup requests
-    FirebaseFirestore.instance
+    _pickupSubscription = FirebaseFirestore.instance
         .collection('pickups')
         .where('status', isEqualTo: 'waiting')
         .snapshots()
@@ -934,7 +959,7 @@ class _DriverScreenState extends State<DriverScreen> {
   void _listenToUserSettings() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    FirebaseFirestore.instance
+    _userSettingsSubscription = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .snapshots()
@@ -953,11 +978,10 @@ class _DriverScreenState extends State<DriverScreen> {
         );
   }
 
-  // Listen to driver's TODA selection from their user profile
   void _listenToDriverToda() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    FirebaseFirestore.instance
+    _todaSubscription = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
         .snapshots()
@@ -1018,13 +1042,6 @@ class _DriverScreenState extends State<DriverScreen> {
 
     if (shouldLogout == true) {
       await _driverAuthService.signOut();
-      if (mounted) {
-        // Navigate back to AuthWrapper so it can route to HomeScreen
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AuthWrapper()),
-          (route) => false,
-        );
-      }
     }
   }
 
@@ -1368,11 +1385,7 @@ class _DriverScreenState extends State<DriverScreen> {
                             'NATODA',
                             'CARNATODA',
                             'ALTODA',
-                            'LAPNATODA',
-                            'Culaba',
-                            'Cabucgayan',
-                            'Maripipi',
-                            'Biliran',
+                            
                           ].map<DropdownMenuItem<String>>((String value) {
                             return DropdownMenuItem<String>(
                               value: value,
