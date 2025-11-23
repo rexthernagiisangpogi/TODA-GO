@@ -1917,19 +1917,74 @@ class _PassengerScreenState extends State<PassengerScreen> {
                                     right: 0,
                                     child: GestureDetector(
                                       onTap: () async {
-                                        try {
-                                          final imageService = ImageUploadService();
-                                          final result = await imageService.pickAndUploadProfileImage();
-                                          if (result != null && mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Profile picture updated!'), backgroundColor: Colors.green),
-                                            );
+                                        if (profileImageUrl != null) {
+                                          final action = await showDialog<String>(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              title: const Text('Profile Picture'),
+                                              content: const Text('What would you like to do?'),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, 'delete'),
+                                                  child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, 'change'),
+                                                  child: const Text('Change'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          if (action == 'delete') {
+                                            try {
+                                              await FirebaseFirestore.instance
+                                                  .collection('users')
+                                                  .doc(user.uid)
+                                                  .update({'profileImageUrl': FieldValue.delete()});
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(content: Text('Profile picture deleted'), backgroundColor: Colors.green),
+                                                );
+                                              }
+                                            } catch (e) {
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(content: Text('Failed to delete: $e'), backgroundColor: Colors.red),
+                                                );
+                                              }
+                                            }
+                                          } else if (action == 'change') {
+                                            try {
+                                              final imageService = ImageUploadService();
+                                              final result = await imageService.pickAndUploadProfileImage();
+                                              if (result != null && mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(content: Text('Profile picture updated!'), backgroundColor: Colors.green),
+                                                );
+                                              }
+                                            } catch (e) {
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(content: Text('Failed to upload: $e'), backgroundColor: Colors.red),
+                                                );
+                                              }
+                                            }
                                           }
-                                        } catch (e) {
-                                          if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text('Failed to upload: $e'), backgroundColor: Colors.red),
-                                            );
+                                        } else {
+                                          try {
+                                            final imageService = ImageUploadService();
+                                            final result = await imageService.pickAndUploadProfileImage();
+                                            if (result != null && mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(content: Text('Profile picture updated!'), backgroundColor: Colors.green),
+                                              );
+                                            }
+                                          } catch (e) {
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text('Failed to upload: $e'), backgroundColor: Colors.red),
+                                              );
+                                            }
                                           }
                                         }
                                       },
